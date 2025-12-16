@@ -225,6 +225,12 @@ function FitnessApp() {
   const [workoutState, setWorkoutState] = useState<WorkoutState>(() => loadInitialData().workout);
   const [meals, setMeals] = useState<MealEntry[]>(() => loadInitialData().meals);
 
+  // Keep latest meals in a ref to avoid stale closures when scheduling saves.
+  const mealsRef = useRef<MealEntry[]>(meals);
+  useEffect(() => {
+    mealsRef.current = meals;
+  }, [meals]);
+
   const [tipOpen, setTipOpen] = useState<boolean>(false);
   const [showLog, setShowLog] = useState<boolean>(false);
 
@@ -265,7 +271,7 @@ function FitnessApp() {
     nextProtein: number,
     nextEvents: ProteinEvent[],
     nextWorkout: WorkoutState,
-    nextMeals: MealEntry[] = meals,
+    nextMeals: MealEntry[],
   ) => {
     if (typeof window === 'undefined') return;
     pendingSaveRef.current = { protein: nextProtein, proteinEvents: nextEvents, workout: nextWorkout, meals: nextMeals };
@@ -289,7 +295,7 @@ function FitnessApp() {
     const newEvents = [newEvent, ...proteinEvents].slice(0, 50);
     setProtein(newProtein);
     setProteinEvents(newEvents);
-    scheduleSave(newProtein, newEvents, workoutState, meals);
+    scheduleSave(newProtein, newEvents, workoutState, mealsRef.current);
   };
 
   const progress = Math.min((protein / 180) * 100, 100);
@@ -299,7 +305,7 @@ function FitnessApp() {
       const current = prev[exercise] ?? { target: parseWorkoutTarget(exercise), count: 0 };
       const nextCount = Math.max(0, Math.min(current.target, current.count + delta));
       const next = { ...prev, [exercise]: { ...current, count: nextCount } };
-      scheduleSave(protein, proteinEvents, next, meals);
+      scheduleSave(protein, proteinEvents, next, mealsRef.current);
       return next;
     });
   };
@@ -310,7 +316,7 @@ function FitnessApp() {
     setWorkoutState(prev => {
       const current = prev[exercise] ?? { target: parseWorkoutTarget(exercise), count: 0 };
       const next = { ...prev, [exercise]: { ...current, count: 0 } };
-      scheduleSave(protein, proteinEvents, next, meals);
+      scheduleSave(protein, proteinEvents, next, mealsRef.current);
       return next;
     });
   };
