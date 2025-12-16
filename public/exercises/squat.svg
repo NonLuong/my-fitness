@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#60a5fa" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#38bdf8" stop-opacity="0.12"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="450" rx="28" fill="#0b1220"/>
+  <rect x="24" y="24" width="752" height="402" rx="22" fill="url(#bg)"/>
+
+  <text x="40" y="70" fill="#e5e7eb" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI" font-size="28" font-weight="800">Squat</text>
+  <text x="40" y="102" fill="#9ca3af" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI" font-size="16">Placeholder image — replace with real photo/GIF at /public/exercises/squat.*</text>
+
+  <!-- simple squat icon -->
+  <g transform="translate(120,140)" opacity="0.9">
+    <circle cx="150" cy="60" r="18" fill="#e5e7eb" opacity="0.20"/>
+    <rect x="138" y="78" width="24" height="64" rx="12" fill="#e5e7eb" opacity="0.20"/>
+    <path d="M150 118 L210 130" stroke="#e5e7eb" stroke-width="12" stroke-linecap="round" opacity="0.18"/>
+    <path d="M150 118 L95 165" stroke="#e5e7eb" stroke-width="12" stroke-linecap="round" opacity="0.18"/>
+    <path d="M118 160 L90 210" stroke="#e5e7eb" stroke-width="12" stroke-linecap="round" opacity="0.18"/>
+    <path d="M210 136 L230 210" stroke="#e5e7eb" stroke-width="12" stroke-linecap="round" opacity="0.18"/>
+
+    <rect x="40" y="30" width="320" height="10" rx="5" fill="#e5e7eb" opacity="0.22"/>
+    <rect x="32" y="20" width="10" height="30" rx="5" fill="#e5e7eb" opacity="0.22"/>
+    <rect x="360" y="20" width="10" height="30" rx="5" fill="#e5e7eb" opacity="0.22"/>
+  </g>
+
+  <g opacity="0.9">
+    <rect x="40" y="360" width="720" height="50" rx="16" fill="#111827" opacity="0.5"/>
+    <text x="60" y="392" fill="#dbeafe" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI" font-size="16" font-weight="700">Tip:</text>
+    <text x="105" y="392" fill="#e5e7eb" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI" font-size="16">Drop in a real file here to replace this placeholder instantly.</text>
+  </g>
+</svg>

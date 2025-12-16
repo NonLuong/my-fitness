@@ -9,9 +9,6 @@ import {
   CheckCircle2,
   Utensils,
   Zap,
-  Egg,
-  Beef,
-  Milk,
   Activity,
   TrendingUp,
   ChevronRight,
@@ -22,11 +19,10 @@ import {
   Sun,
   Moon,
   Monitor,
-  MessageCircle,
-  Image as ImageIcon,
-  Send,
-  Plus
+  Plus,
 } from 'lucide-react';
+
+import { resolveExerciseDetailFromLabel } from '@/lib/exercises';
 
 // --- 1. Type Definition ---
 interface DailySchedule {
@@ -96,6 +92,8 @@ type MealItem = {
   notes: string[];
 };
 
+// AI Nutrition panel was removed for now (to keep page.tsx stable).
+
 type MealEntry = {
   id: string;
   ts: number;
@@ -163,20 +161,17 @@ function FitnessApp() {
   // Track mobile mode reactively (so it updates when rotating/resizing)
   const [isMobile, setIsMobile] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
-    return window.matchMedia?.('(max-width: 767px)')?.matches ?? false;
+    return window.innerWidth < 768;
   });
 
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 767px)');
-    const onChange = () => setIsMobile(mq.matches);
-    onChange();
-    mq.addEventListener('change', onChange);
-    window.addEventListener('orientationchange', onChange);
-    window.addEventListener('resize', onChange);
+    const onResize = () => setIsMobile(window.innerWidth < 768);
+    onResize();
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
     return () => {
-      mq.removeEventListener('change', onChange);
-      window.removeEventListener('orientationchange', onChange);
-      window.removeEventListener('resize', onChange);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
     };
   }, []);
 
@@ -232,6 +227,14 @@ function FitnessApp() {
 
   const [tipOpen, setTipOpen] = useState<boolean>(false);
   const [showLog, setShowLog] = useState<boolean>(false);
+
+  // Workout details modal
+  const [selectedExerciseLabel, setSelectedExerciseLabel] = useState<string | null>(null);
+
+  const selectedExerciseDetail = useMemo(() => {
+    if (!selectedExerciseLabel) return null;
+    return resolveExerciseDetailFromLabel(selectedExerciseLabel);
+  }, [selectedExerciseLabel]);
 
   // --- AI Nutrition (Gemini) ---
   const [aiOpen, setAiOpen] = useState<boolean>(false);
@@ -312,21 +315,6 @@ function FitnessApp() {
     });
   };
 
-  const resetAllToday = () => {
-    const nextWorkout = makeWorkoutState(todaySchedule.exercises);
-    setProtein(0);
-    setProteinEvents([]);
-    setWorkoutState(nextWorkout);
-    setMeals([]);
-    scheduleSave(0, [], nextWorkout, []);
-  };
-
-  const proteinItems = useMemo(() => ([
-    { label: 'Whey Scoop', grams: 25, icon: Milk, desc: 'Supplement', category: 'supplement' as const },
-    { label: 'Chicken Breast', grams: 23, icon: Beef, desc: 'Whole food', category: 'whole_food' as const },
-    { label: 'Boiled Egg', grams: 7, icon: Egg, desc: 'Snack', category: 'snack' as const }
-  ]), []);
-
   const analyzeNutrition = async () => {
     setAiError(null);
     setAiResponse(null);
@@ -366,23 +354,16 @@ function FitnessApp() {
 
     // Credit total protein ONLY when saving the meal, not on analyze.
     const proteinFingerprint = `${aiMealType}::${aiText.trim()}::${aiResponse.results
-      .map(r => `${r.itemName}:${r.proteinG ?? 0}`)
+      .map((r) => `${r.itemName}:${r.proteinG ?? 0}`)
       .join('|')}`;
     if (lastAiMealProteinCreditRef.current !== proteinFingerprint) {
       lastAiMealProteinCreditRef.current = proteinFingerprint;
-      const totalProtein = Math.round(aiResponse.results.reduce((sum, r) => sum + (r.proteinG ?? 0), 0));
-      if (totalProtein > 0) {
-        addProtein({
-          label: `AI meal: ${aiResponse.results[0]?.itemName ?? 'มื้ออาหาร'}`,
-          grams: totalProtein,
-          category: 'whole_food',
-        });
-      }
+      for (const r of aiResponse.results) addProteinFromAi(r);
     }
 
-    const entry: MealEntry = {
-      id: makeId(),
-      ts: new Date().getTime(),
+    const newMeal: MealEntry = {
+      id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      ts: Date.now(),
       mealType: aiMealType,
       sourceText: aiText.trim() || undefined,
       items: aiResponse.results.map((r) => ({
@@ -400,15 +381,19 @@ function FitnessApp() {
       })),
     };
 
-    const nextMeals = [entry, ...meals].slice(0, 40);
-    setMeals(nextMeals);
-    scheduleSave(protein, proteinEvents, workoutState, nextMeals);
+    setMeals((prev) => {
+      const nextMeals = [newMeal, ...(prev ?? [])];
+      scheduleSave(protein, proteinEvents, workoutState, nextMeals);
+      return nextMeals;
+    });
   };
 
   const deleteMeal = (id: string) => {
-    const nextMeals = meals.filter(m => m.id !== id);
-    setMeals(nextMeals);
-    scheduleSave(protein, proteinEvents, workoutState, nextMeals);
+    setMeals((prev) => {
+      const nextMeals = (prev ?? []).filter((m) => m.id !== id);
+      scheduleSave(protein, proteinEvents, workoutState, nextMeals);
+      return nextMeals;
+    });
   };
 
   const mealTotals = useMemo(() => {
@@ -417,7 +402,7 @@ function FitnessApp() {
     let carbsG = 0;
     let fatG = 0;
 
-    for (const meal of meals) {
+    for (const meal of meals ?? []) {
       for (const item of meal.items) {
         caloriesKcal += item.caloriesKcal ?? 0;
         proteinG += item.proteinG ?? 0;
@@ -434,45 +419,34 @@ function FitnessApp() {
     };
   }, [meals]);
 
+  const proteinItems = useMemo(() => (
+    [
+      { label: 'Whey Scoop', grams: 25, icon: Dumbbell, desc: 'Supplement', category: 'supplement' as const },
+      { label: 'Chicken Breast', grams: 23, icon: Utensils, desc: 'Whole food', category: 'whole_food' as const },
+      { label: 'Boiled Egg', grams: 7, icon: Flame, desc: 'Snack', category: 'snack' as const },
+    ]
+  ), []);
+
+  const resetAllToday = () => {
+    const nextWorkout = makeWorkoutState(todaySchedule.exercises);
+    setProtein(0);
+    setProteinEvents([]);
+    setWorkoutState(nextWorkout);
+    setMeals([]);
+    scheduleSave(0, [], nextWorkout, []);
+  };
+
   return (
-    <div className="min-h-screen font-sans transition-colors duration-300 ease-in-out
-      bg-gray-50 text-neutral-900 
-      dark:bg-neutral-950 dark:text-neutral-100 
-      selection:bg-emerald-500/30 selection:text-emerald-700 dark:selection:text-emerald-200 
-      pb-20 relative overflow-x-hidden">
-
-      {/* Background Ambience */}
-      <div className="absolute inset-0 -z-10 overflow-hidden pointer-events-none">
-        {/* Light Mode Gradient */}
-  <div className="absolute inset-0 bg-linear-to-b from-white to-gray-100 dark:hidden" />
-
-        {/* Dark Mode Gradient */}
-  <div className="hidden dark:block absolute inset-0 bg-linear-to-b from-neutral-950 via-neutral-950 to-neutral-900" />
-
-        {/* Orbs - Adjusted for both modes */}
-        <div className="absolute -top-40 -left-32 h-130 w-130 rounded-full 
-          bg-emerald-400/20 blur-[100px] 
-          dark:bg-emerald-500/10 dark:blur-[110px]" />
-        <div className="absolute -bottom-40 -right-32 h-130 w-130 rounded-full 
-          bg-cyan-400/20 blur-[100px] 
-          dark:bg-cyan-500/10 dark:blur-[110px]" />
-
-        {/* Grid Pattern */}
-        <div className="absolute inset-0 opacity-[0.03] dark:opacity-[0.06] 
-          bg-[radial-gradient(#000_1px,transparent_1px)] dark:bg-[radial-gradient(rgba(255,255,255,0.18)_1px,transparent_1px)] 
-          bg-size-[18px_18px]" />
-      </div>
-
+    <div>
       {/* AI Nutrition — compact card */}
       <div className="fixed bottom-5 right-5 z-40">
         <button
-          onClick={() => setAiOpen(v => !v)}
+          onClick={() => setAiOpen((v) => !v)}
           className="group flex items-center gap-2 rounded-2xl border border-white/10 bg-white/80 px-4 py-3 text-sm font-semibold shadow-lg backdrop-blur-xl transition hover:bg-white dark:bg-neutral-900/70 dark:hover:bg-neutral-900"
           aria-label="AI Nutrition"
         >
           <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
           <span className="hidden sm:inline">AI Nutrition</span>
-          <MessageCircle className="h-4 w-4 text-neutral-500 dark:text-neutral-300" />
         </button>
       </div>
 
@@ -487,10 +461,8 @@ function FitnessApp() {
             onClick={() => setAiOpen(false)}
             aria-hidden
           >
-            {/* Backdrop (click outside to close) */}
             <div className="absolute inset-0 bg-black/10 dark:bg-black/40" />
 
-            {/* Panel */}
             <motion.div
               initial={{ opacity: 0, y: 12, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -506,7 +478,7 @@ function FitnessApp() {
                   <Sparkles className="h-5 w-5 text-emerald-600 dark:text-emerald-300" />
                   <div>
                     <div className="text-sm font-bold">AI Nutrition</div>
-                    <div className="text-[11px] text-neutral-500 dark:text-neutral-400">Gemini Pro • text + image • estimate</div>
+                    <div className="text-[11px] text-neutral-500 dark:text-neutral-400">estimate • text + photo</div>
                   </div>
                 </div>
                 <button
@@ -518,151 +490,93 @@ function FitnessApp() {
               </div>
 
               <div className="space-y-3 p-5">
-              <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-300">What did you eat?</label>
-              <textarea
-                value={aiText}
-                onChange={(e) => setAiText(e.target.value)}
-                placeholder="เช่น: ข้าวกะเพราไก่ไข่ดาว 1 จาน / เวย์ 1 สกู๊ป + กล้วย 1 ลูก"
-                onKeyDown={(e) => {
-                  // Chat-like UX:
-                  // - Enter: send
-                  // - Shift+Enter: new line
-                  // Note: "Spacebar+Enter" isn't a reliable/standard modifier across browsers/keyboards.
-                  if (e.key !== 'Enter') return;
-                  if (e.shiftKey) return;
-                  e.preventDefault();
-                  if (aiLoading) return;
-                  if (!aiText.trim() && !aiImage) return;
-                  void analyzeNutrition();
-                }}
-                className="h-24 w-full resize-none rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm outline-none ring-0 focus:border-emerald-400/60 dark:border-white/10 dark:bg-neutral-900/60"
-              />
-
-              <div className="flex items-center justify-between gap-3">
-                <label className="flex cursor-pointer items-center gap-2 rounded-2xl border border-black/10 bg-white/60 px-3 py-2 text-xs font-semibold text-neutral-700 transition hover:bg-white dark:border-white/10 dark:bg-neutral-900/60 dark:text-neutral-200">
-                  <ImageIcon className="h-4 w-4" />
-                  <span>{aiImage ? aiImage.name : 'Add photo (optional)'}</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => setAiImage(e.target.files?.[0] ?? null)}
-                  />
-                </label>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAiText('');
-                    setAiImage(null);
-                    setAiError(null);
-                    setAiResponse(null);
-                    lastAiMealProteinCreditRef.current = null;
+                <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-300">What did you eat?</label>
+                <textarea
+                  value={aiText}
+                  onChange={(e) => setAiText(e.target.value)}
+                  placeholder="เช่น: ข้าวกะเพราไก่ไข่ดาว 1 จาน / เวย์ 1 สกู๊ป + กล้วย 1 ลูก"
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter') return;
+                    if (e.shiftKey) return;
+                    e.preventDefault();
+                    if (aiLoading) return;
+                    if (!aiText.trim() && !aiImage) return;
+                    void analyzeNutrition();
                   }}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-black/10 bg-white/60 px-4 py-2 text-xs font-bold text-neutral-700 transition hover:bg-white disabled:opacity-50 dark:border-white/10 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-900"
-                  disabled={aiLoading && !aiResponse}
-                >
-                  Clear
-                </button>
+                  className="h-24 w-full resize-none rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm outline-none ring-0 focus:border-emerald-400/60 dark:border-white/10 dark:bg-neutral-900/60"
+                />
 
-                <button
-                  onClick={analyzeNutrition}
-                  disabled={aiLoading || (!aiText.trim() && !aiImage)}
-                  className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow transition enabled:hover:bg-emerald-500 disabled:opacity-50"
-                >
-                  <Send className="h-4 w-4" />
-                  {aiLoading ? 'Analyzing…' : 'Analyze'}
-                </button>
-              </div>
+                <div className="flex items-center justify-between gap-3">
+                  <label className="flex cursor-pointer items-center gap-2 rounded-2xl border border-black/10 bg-white/60 px-3 py-2 text-xs font-semibold text-neutral-700 transition hover:bg-white dark:border-white/10 dark:bg-neutral-900/60 dark:text-neutral-200">
+                    <span>{aiImage ? aiImage.name : 'Add photo (optional)'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => setAiImage(e.target.files?.[0] ?? null)}
+                    />
+                  </label>
 
-              {aiError && (
-                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700 dark:border-rose-500/20 dark:bg-rose-950/30 dark:text-rose-200">
-                  {aiError}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAiText('');
+                      setAiImage(null);
+                      setAiError(null);
+                      setAiResponse(null);
+                      lastAiMealProteinCreditRef.current = null;
+                    }}
+                    className="inline-flex items-center gap-2 rounded-2xl border border-black/10 bg-white/60 px-4 py-2 text-xs font-bold text-neutral-700 transition hover:bg-white disabled:opacity-50 dark:border-white/10 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-900"
+                    disabled={aiLoading && !aiResponse}
+                  >
+                    Clear
+                  </button>
+
+                  <button
+                    onClick={analyzeNutrition}
+                    disabled={aiLoading || (!aiText.trim() && !aiImage)}
+                    className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow transition enabled:hover:bg-emerald-500 disabled:opacity-50"
+                  >
+                    {aiLoading ? 'Analyzing…' : 'Analyze'}
+                  </button>
                 </div>
-              )}
 
-              {aiResponse?.results && aiResponse.results.length > 0 && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between gap-3 rounded-3xl border border-black/5 bg-white/60 p-3 dark:border-white/10 dark:bg-neutral-900/40">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-bold text-neutral-600 dark:text-neutral-300">Save as:</span>
-                      <select
-                        value={aiMealType}
-                        onChange={(e) => setAiMealType(e.target.value as MealType)}
-                        className="rounded-2xl border border-black/10 bg-white/70 px-3 py-2 text-xs font-semibold text-neutral-800 outline-none dark:border-white/10 dark:bg-neutral-950/50 dark:text-neutral-100"
-                      >
-                        <option value="breakfast">Breakfast</option>
-                        <option value="lunch">Lunch</option>
-                        <option value="dinner">Dinner</option>
-                        <option value="snack">Snack</option>
-                      </select>
-                    </div>
-                    <button
-                      onClick={saveAiAsMeal}
-                      className="inline-flex items-center gap-2 rounded-2xl bg-neutral-900 px-3 py-2 text-xs font-bold text-white transition hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
-                    >
-                      <Plus className="h-4 w-4" />
-                      Save meal
-                    </button>
+                {aiError && (
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700 dark:border-rose-500/20 dark:bg-rose-950/30 dark:text-rose-200">
+                    {aiError}
                   </div>
+                )}
 
-                  {aiResponse.results.map((r, idx) => (
-                    <div key={idx} className="rounded-3xl border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-neutral-900/50">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-bold">{r.itemName}</div>
-                          <div className="text-[11px] text-neutral-500 dark:text-neutral-400">{r.assumedServing}</div>
-                        </div>
-                        <div className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400">confidence: {r.confidence}</div>
-                      </div>
-
-                      <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-                        <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                          <div className="text-[10px] text-neutral-500 dark:text-neutral-400">kcal</div>
-                          <div className="text-sm font-extrabold">{r.caloriesKcal ?? '—'}</div>
-                        </div>
-                        <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                          <div className="text-[10px] text-neutral-500 dark:text-neutral-400">P</div>
-                          <div className="text-sm font-extrabold">{r.proteinG ?? '—'}</div>
-                        </div>
-                        <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                          <div className="text-[10px] text-neutral-500 dark:text-neutral-400">C</div>
-                          <div className="text-sm font-extrabold">{r.carbsG ?? '—'}</div>
-                        </div>
-                        <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                          <div className="text-[10px] text-neutral-500 dark:text-neutral-400">F</div>
-                          <div className="text-sm font-extrabold">{r.fatG ?? '—'}</div>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 flex items-center justify-between gap-2">
-                        <div className="text-[11px] text-neutral-500 dark:text-neutral-400 line-clamp-2">
-                          {r.notes?.[0] ?? 'Tip: Specify portion size for better accuracy.'}
-                        </div>
-                        <button
-                          onClick={() => addProteinFromAi(r)}
-                          disabled={!r.proteinG || r.proteinG <= 0}
-                          className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-500/20 dark:bg-emerald-950/30 dark:text-emerald-200"
+                {aiResponse?.results && aiResponse.results.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3 rounded-3xl border border-black/5 bg-white/60 p-3 dark:border-white/10 dark:bg-neutral-900/40">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-bold text-neutral-600 dark:text-neutral-300">Save as:</span>
+                        <select
+                          value={aiMealType}
+                          onChange={(e) => setAiMealType(e.target.value as MealType)}
+                          className="rounded-2xl border border-black/10 bg-white/70 px-3 py-2 text-xs font-semibold text-neutral-800 outline-none dark:border-white/10 dark:bg-neutral-950/50 dark:text-neutral-100"
                         >
-                          <Plus className="h-4 w-4" />
-                          Add protein
-                        </button>
+                          <option value="breakfast">Breakfast</option>
+                          <option value="lunch">Lunch</option>
+                          <option value="dinner">Dinner</option>
+                          <option value="snack">Snack</option>
+                        </select>
                       </div>
+                      <button
+                        onClick={saveAiAsMeal}
+                        className="inline-flex items-center gap-2 rounded-2xl bg-neutral-900 px-3 py-2 text-xs font-bold text-white transition hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Save meal
+                      </button>
                     </div>
-                  ))}
 
-                  {aiResponse.followUpQuestions && aiResponse.followUpQuestions.length > 0 && (
-                    <div className="rounded-3xl border border-black/5 bg-white/60 p-4 text-xs text-neutral-700 dark:border-white/10 dark:bg-neutral-900/40 dark:text-neutral-200">
-                      <div className="mb-2 font-bold text-[11px] text-neutral-500 dark:text-neutral-400">To be more accurate:</div>
-                      <ul className="list-disc pl-5 space-y-1">
-                        {aiResponse.followUpQuestions.slice(0, 4).map((q, i) => (
-                          <li key={i}>{q}</li>
-                        ))}
-                      </ul>
+                    <div className="rounded-3xl border border-black/5 bg-white/60 p-3 text-[11px] text-neutral-600 dark:border-white/10 dark:bg-neutral-900/40 dark:text-neutral-300">
+                      Tip: Save meals from AI Nutrition to build accurate day totals.
                     </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                )}
               </div>
             </motion.div>
           </motion.div>
@@ -670,10 +584,9 @@ function FitnessApp() {
       </AnimatePresence>
 
       {/* Navbar */}
-      <nav className="sticky top-0 z-50 px-6 py-4 
-        backdrop-blur-xl border-b transition-colors duration-300
-        bg-white/70 border-gray-200 
-        dark:bg-neutral-950/70 dark:border-white/5">
+      <nav
+        className={`sticky top-0 z-50 px-6 py-4 backdrop-blur-xl border-b transition-colors duration-300 bg-white/70 border-gray-200 dark:bg-neutral-950/70 dark:border-white/5`}
+      >
         <div className="max-w-6xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2">
             <div className="bg-emerald-500 p-2 rounded-lg shadow-lg shadow-emerald-500/20">
@@ -896,7 +809,7 @@ function FitnessApp() {
                     initial={false}
                     animate={false}
                     transition={undefined}
-                    onClick={() => incrementExercise(ex)}
+                    onClick={() => setSelectedExerciseLabel(ex)}
                     className={`
                         group relative p-5 rounded-2xl cursor-pointer border transition-all duration-200 shadow-sm
                         ${done
@@ -928,9 +841,16 @@ function FitnessApp() {
                               : 'bg-gray-50 border-gray-200 dark:bg-neutral-950/40 dark:border-neutral-800'
                             }`}>
                             <span className={done ? 'text-emerald-700 dark:text-emerald-400' : 'text-gray-900 dark:text-neutral-200'}>{item.count}</span>
-                            <span className="text-gray-500 dark:text-neutral-600"> / {item.target}</span>
-                            <span className="ml-2 text-xs text-gray-400 dark:text-neutral-500">(tap +1)</span>
-                          </div>
+                            <span className="text-gray-500 dark:text-neutral-600"> / {item.target}</span>                          </div>
+
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); incrementExercise(ex); }}
+                              className="inline-flex items-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1 text-sm font-extrabold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/20 dark:bg-emerald-950/30 dark:text-emerald-200 dark:hover:bg-emerald-950/45"
+                              aria-label="เพิ่มจำนวนเซ็ต"
+                            >
+                              <Plus className="w-4 h-4" />
+                            </button>
 
                           <button
                             type="button"
@@ -949,6 +869,233 @@ function FitnessApp() {
               })}
             </div>
           </div>
+
+          {/* Exercise details modal */}
+          <AnimatePresence initial={false}>
+            {selectedExerciseLabel && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.18, ease: 'easeOut' }}
+                className="fixed inset-0 z-50"
+                onClick={() => setSelectedExerciseLabel(null)}
+                aria-hidden
+              >
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.18, ease: 'easeOut' }}
+                  className="absolute inset-0 bg-black/35 backdrop-blur-[2px]"
+                />
+
+                <motion.div
+                  initial={{ opacity: 0, y: 36, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 36, scale: 0.98 }}
+                  transition={{ type: 'spring', stiffness: 320, damping: 28, mass: 0.9 }}
+                  className="fixed bottom-0 left-0 right-0 z-50 max-h-[88vh] w-full overflow-hidden rounded-t-4xl border border-white/10 bg-white/92 shadow-2xl backdrop-blur-xl dark:bg-neutral-950/88 md:bottom-auto md:left-1/2 md:top-1/2 md:max-h-[84vh] md:w-[min(92vw,820px)] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-4xl"
+                  onClick={(e) => e.stopPropagation()}
+                  role="dialog"
+                  aria-label="Exercise details"
+                >
+                  {/* Header (sticky) */}
+                  <div className="sticky top-0 z-10 border-b border-black/5 bg-white/55 px-5 pb-4 pt-3 shadow-[0_18px_40px_-28px_rgba(0,0,0,0.35)] backdrop-blur-2xl dark:border-white/10 dark:bg-neutral-950/45">
+                    {/* drag handle (mobile) */}
+                    <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-black/10 dark:bg-white/10 md:hidden" />
+
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="inline-flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/35 bg-white/35 px-2.5 py-1 text-[11px] font-extrabold tracking-wide text-neutral-900 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:text-white">
+                            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/90 text-white shadow-sm dark:bg-emerald-400/90">
+                              <Dumbbell className="h-3.5 w-3.5" />
+                            </span>
+                            <span className="uppercase">{selectedExerciseDetail?.category ?? 'workout'}</span>
+                          </span>
+                          <span className="hidden text-[11px] font-semibold text-neutral-500 dark:text-neutral-400 sm:inline">
+                            tap outside to close
+                          </span>
+                        </div>
+
+                        <div className="mt-2 truncate text-lg font-black tracking-tight text-neutral-950 dark:text-white">
+                          {selectedExerciseDetail?.thaiName ?? selectedExerciseLabel}
+                        </div>
+
+                        <div className="mt-1 text-xs font-semibold text-neutral-700/90 dark:text-neutral-200/85">
+                          {selectedExerciseDetail?.primary?.length
+                            ? `กล้ามเนื้อหลัก: ${selectedExerciseDetail.primary.join(' • ')}`
+                            : 'รายละเอียดท่าออกกำลังกาย'}
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => setSelectedExerciseLabel(null)}
+                        className="rounded-2xl border border-black/10 bg-white/70 px-3 py-2 text-xs font-bold text-neutral-700 shadow-sm transition hover:bg-white active:scale-[0.98] dark:border-white/10 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-900"
+                      >
+                        ปิด
+                      </button>
+                    </div>
+
+                    {/* premium glass wash */}
+                    <div className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-36 bg-linear-to-b from-emerald-500/16 via-cyan-500/8 to-transparent dark:from-emerald-400/14 dark:via-cyan-400/6" />
+                    <div className="pointer-events-none absolute -right-16 -top-20 -z-10 h-48 w-48 rounded-full bg-emerald-500/12 blur-3xl dark:bg-emerald-400/10" />
+                    <div className="pointer-events-none absolute -left-20 -top-24 -z-10 h-56 w-56 rounded-full bg-cyan-500/10 blur-3xl dark:bg-cyan-400/8" />
+                  </div>
+
+                  <div className="max-h-[calc(88vh-84px)] overflow-y-auto overscroll-contain px-5 pb-6 pt-4 md:max-h-[calc(84vh-96px)] md:px-6">
+                    {/* Details */}
+                    <div className="space-y-4 md:col-span-2">
+                      {/* Key cues (poster chips) */}
+                      <div className="rounded-3xl border border-black/5 bg-white/60 p-4 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-neutral-900/35">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-xs font-black tracking-wide text-neutral-700 dark:text-neutral-200">KEY CUES</div>
+                          <div className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400">เลื่อนซ้าย/ขวา</div>
+                        </div>
+
+                        {(() => {
+                          const chips = (selectedExerciseDetail?.cues?.length
+                            ? selectedExerciseDetail.cues
+                            : selectedExerciseDetail?.focus ?? [])
+                            .slice(0, 8);
+
+                          return (
+                            <div className="mt-3 flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                              {chips.length ? (
+                                chips.map((c, i) => (
+                                  <span
+                                    key={`${c}-${i}`}
+                                    className="group inline-flex shrink-0 items-center gap-2 rounded-full border border-white/35 bg-white/55 px-3.5 py-2 text-xs font-extrabold text-neutral-900 shadow-sm backdrop-blur-xl transition hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/8"
+                                  >
+                                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500/90 text-white shadow-sm transition group-hover:scale-[1.03] dark:bg-emerald-400/90">
+                                      <Zap className="h-3.5 w-3.5" />
+                                    </span>
+                                    {c}
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="text-sm text-neutral-600 dark:text-neutral-300">กำลังเตรียมคิวสำคัญ…</span>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      {/* Quick summary */}
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="relative overflow-hidden rounded-3xl border border-white/35 bg-white/55 p-4 shadow-[0_18px_45px_-32px_rgba(0,0,0,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+                          <div className="absolute -right-10 -top-10 h-24 w-24 rounded-full bg-emerald-500/10 blur-2xl" />
+                          <div className="text-xs font-black tracking-wide text-neutral-800 dark:text-neutral-100">โฟกัสตอนเล่น</div>
+                          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-neutral-800 dark:text-neutral-200">
+                            {(selectedExerciseDetail?.focus ?? []).map((s, i) => (
+                              <li key={i}>{s}</li>
+                            ))}
+                            {!selectedExerciseDetail?.focus?.length && <li>คุมฟอร์มให้มั่นคง และหายใจสม่ำเสมอ</li>}
+                          </ul>
+                        </div>
+
+                        <div className="relative overflow-hidden rounded-3xl border border-white/35 bg-white/55 p-4 shadow-[0_18px_45px_-32px_rgba(0,0,0,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+                          <div className="absolute -left-10 -bottom-10 h-24 w-24 rounded-full bg-cyan-500/10 blur-2xl" />
+                          <div className="text-xs font-black tracking-wide text-neutral-800 dark:text-neutral-100">ได้ส่วนไหน / ได้อะไร</div>
+                          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-neutral-800 dark:text-neutral-200">
+                            {(selectedExerciseDetail?.youGet ?? []).map((s, i) => (
+                              <li key={i}>{s}</li>
+                            ))}
+                            {!selectedExerciseDetail?.youGet?.length && <li>เพิ่มความแข็งแรงและความฟิตโดยรวม</li>}
+                          </ul>
+                        </div>
+                      </div>
+
+                      <div className="rounded-3xl border border-white/35 bg-white/55 p-4 shadow-[0_18px_45px_-32px_rgba(0,0,0,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+                        <div className="text-xs font-black tracking-wide text-neutral-800 dark:text-neutral-100">วิธีทำ (สรุป)</div>
+                        <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-neutral-800 dark:text-neutral-200">
+                          {(selectedExerciseDetail?.steps ?? ['กำลังเตรียมรายละเอียดท่านี้…']).map((s, i) => (
+                            <li key={i}>{s}</li>
+                          ))}
+                        </ol>
+                      </div>
+
+                      <div className="rounded-3xl border border-white/35 bg-white/55 p-4 shadow-[0_18px_45px_-32px_rgba(0,0,0,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+                        <div className="text-xs font-black tracking-wide text-neutral-800 dark:text-neutral-100">คิวสำคัญ</div>
+                        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-neutral-800 dark:text-neutral-200">
+                          {(selectedExerciseDetail?.cues ?? []).map((s, i) => (
+                            <li key={i}>{s}</li>
+                          ))}
+                          {!selectedExerciseDetail?.cues?.length && <li>คุมท่าให้มั่นคง และหายใจสม่ำเสมอ</li>}
+                        </ul>
+                      </div>
+
+                      <div className="rounded-3xl border border-white/35 bg-white/55 p-4 shadow-[0_18px_45px_-32px_rgba(0,0,0,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+                        <div className="text-xs font-black tracking-wide text-neutral-800 dark:text-neutral-100">ข้อผิดพลาดที่พบบ่อย</div>
+                        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-neutral-800 dark:text-neutral-200">
+                          {(selectedExerciseDetail?.mistakes ?? []).map((s, i) => (
+                            <li key={i}>{s}</li>
+                          ))}
+                          {!selectedExerciseDetail?.mistakes?.length && <li>อย่าเร่งจังหวะจนเสียฟอร์ม</li>}
+                        </ul>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="rounded-3xl border border-white/35 bg-white/55 p-4 shadow-[0_18px_45px_-32px_rgba(0,0,0,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+                          <div className="text-xs font-black tracking-wide text-neutral-800 dark:text-neutral-100">ความปลอดภัย / ข้อควรระวัง</div>
+                          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-neutral-800 dark:text-neutral-200">
+                            {(selectedExerciseDetail?.safety ?? []).map((s, i) => (
+                              <li key={i}>{s}</li>
+                            ))}
+                            {!selectedExerciseDetail?.safety?.length && <li>ลดน้ำหนักทันทีถ้าฟอร์มเริ่มเสีย</li>}
+                          </ul>
+                        </div>
+
+                        <div className="rounded-3xl border border-white/35 bg-white/55 p-4 shadow-[0_18px_45px_-32px_rgba(0,0,0,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+                          <div className="text-xs font-black tracking-wide text-neutral-800 dark:text-neutral-100">จังหวะ / การหายใจ</div>
+                          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-neutral-800 dark:text-neutral-200">
+                            {(selectedExerciseDetail?.tempoBreathing ?? []).map((s, i) => (
+                              <li key={i}>{s}</li>
+                            ))}
+                            {!selectedExerciseDetail?.tempoBreathing?.length && <li>คุมลงช้า ออกแรงตอนดัน/ดึง</li>}
+                          </ul>
+                        </div>
+                      </div>
+
+                      {/* Set controls */}
+                      {selectedExerciseLabel && (
+                        <div className="flex flex-col gap-3 rounded-3xl border border-black/5 bg-white/80 p-4 shadow-sm dark:border-white/10 dark:bg-neutral-900/45 md:flex-row md:items-center md:justify-between">
+                          {(() => {
+                            const item = workoutState[selectedExerciseLabel] ?? { target: parseWorkoutTarget(selectedExerciseLabel), count: 0 };
+                            return (
+                              <>
+                                <div className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">
+                                  เซ็ตวันนี้: <span className="font-extrabold">{item.count}</span>
+                                  <span className="text-neutral-500 dark:text-neutral-400"> / {item.target}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => incrementExercise(selectedExerciseLabel)}
+                                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2.5 text-xs font-extrabold text-white shadow-sm transition hover:bg-emerald-500 active:scale-[0.98]"
+                                  >
+                                    <Plus className="h-4 w-4" /> เพิ่มเซ็ต
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => resetExercise(selectedExerciseLabel)}
+                                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-black/10 bg-white/70 px-4 py-2.5 text-xs font-extrabold text-neutral-800 shadow-sm transition hover:bg-white active:scale-[0.98] dark:border-white/10 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-900"
+                                  >
+                                    <RotateCw className="h-4 w-4" /> รีเซ็ต
+                                  </button>
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Right Column: Nutrition & Extras (Span 4) */}
           <div className="md:col-span-4 space-y-6">
