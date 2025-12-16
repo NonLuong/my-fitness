@@ -1,8 +1,18 @@
+/* stylelint-disable at-rule-no-unknown */
 @import "tailwindcss";
+
+/* Tailwind CSS v4: enable `dark:` utilities using the `.dark` class on a parent (e.g. <html class="dark">) */
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   --background: #ffffff;
   --foreground: #171717;
+}
+
+/* Class-based dark mode (used by the app's theme toggle) */
+.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
 }
 
 @theme inline {
@@ -24,3 +34,5 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* stylelint-enable at-rule-no-unknown */
