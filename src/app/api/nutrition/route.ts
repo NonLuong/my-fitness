@@ -65,21 +65,28 @@ function normalizeConfidence(v: unknown): NutritionResult['confidence'] {
   return v === 'high' || v === 'medium' || v === 'low' ? v : 'medium';
 }
 
-function extractFirstJsonObject(text: string): string | null {
-  // Common failure mode: model wraps JSON in markdown fences or adds pre/post text.
+function stripCodeFences(text: string): string {
   const fence = /```(?:json)?\s*([\s\S]*?)\s*```/i.exec(text);
   if (fence?.[1]) return fence[1].trim();
+  return text.trim();
+}
 
-  const start = text.indexOf('{');
+function extractLastBalancedJsonObject(text: string): string | null {
+  const cleaned = stripCodeFences(text);
+
+  const start = cleaned.indexOf('{');
   if (start === -1) return null;
 
-  // Scan forward and return the first balanced JSON object.
+  // Scan forward and keep the last balanced JSON object. Some model outputs contain
+  // extra trailing characters or partial quoted text after the JSON.
+  let last: string | null = null;
   let depth = 0;
   let inString = false;
   let escape = false;
 
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i];
+  for (let i = start; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+
     if (inString) {
       if (escape) {
         escape = false;
@@ -101,13 +108,14 @@ function extractFirstJsonObject(text: string): string | null {
     if (ch === '{') depth++;
     if (ch === '}') {
       depth--;
-      if (depth === 0) return text.slice(start, i + 1).trim();
+      if (depth === 0) {
+        last = cleaned.slice(start, i + 1).trim();
+      }
       if (depth < 0) return null;
     }
   }
 
-  // No balanced object found (likely truncated output).
-  return null;
+  return last;
 }
 
 function makeErrorId(): string {
@@ -122,8 +130,36 @@ function truncateForLog(text: string, limit = 2000): string {
 }
 
 function parseGeminiJson(raw: string): GeminiJson {
-  const candidate = extractFirstJsonObject(raw) ?? raw.trim();
-  return JSON.parse(candidate) as GeminiJson;
+  const candidate = extractLastBalancedJsonObject(raw) ?? stripCodeFences(raw);
+  try {
+    return JSON.parse(candidate) as GeminiJson;
+  } catch {
+    // Light repair for common near-JSON glitches observed in Gemini output:
+    // - stray standalone tokens on their own line (e.g. "n")
+    // - unterminated trailing string at the end of the payload
+    // - trailing commas
+    let repaired = candidate;
+
+    // Remove lines that are only a single letter token (common artifact in some streams).
+    repaired = repaired.replace(/\n\s*[a-zA-Z]\s*\n/g, '\n');
+
+    // Remove trailing commas before } or ]
+    repaired = repaired.replace(/,\s*([}\]])/g, '$1');
+
+    // If JSON ends mid-string (unterminated quote), close it and then close braces/brackets.
+    // This is best-effort; if it's too broken we'll still error and fall back to repair pass.
+    const quoteCount = (repaired.match(/(?<!\\)"/g) ?? []).length;
+    if (quoteCount % 2 === 1) {
+      repaired = `${repaired}"`;
+    }
+
+    // If we somehow lost the final closing brace, try to append one.
+    const openBraces = (repaired.match(/{/g) ?? []).length;
+    const closeBraces = (repaired.match(/}/g) ?? []).length;
+    if (openBraces > closeBraces) repaired = `${repaired}${'}'.repeat(openBraces - closeBraces)}`;
+
+    return JSON.parse(repaired) as GeminiJson;
+  }
 }
 
 export async function POST(req: Request) {
