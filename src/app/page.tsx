@@ -21,7 +21,11 @@ import {
   Sparkles,
   Sun,
   Moon,
-  Monitor
+  Monitor,
+  MessageCircle,
+  Image as ImageIcon,
+  Send,
+  Plus
 } from 'lucide-react';
 
 // --- 1. Type Definition ---
@@ -53,6 +57,59 @@ type ScheduleType = {
 };
 
 type ThemeMode = 'light' | 'dark' | 'system';
+
+type AiNutritionResult = {
+  itemName: string;
+  assumedServing: string;
+  caloriesKcal: number | null;
+  proteinG: number | null;
+  carbsG: number | null;
+  fatG: number | null;
+  fiberG?: number | null;
+  sugarG?: number | null;
+  sodiumMg?: number | null;
+  confidence: 'low' | 'medium' | 'high';
+  notes: string[];
+};
+
+type AiNutritionResponse = {
+  ok: boolean;
+  results?: AiNutritionResult[];
+  followUpQuestions?: string[];
+  reasoningSummary?: string;
+  error?: string;
+};
+
+type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
+
+type MealItem = {
+  itemName: string;
+  assumedServing: string;
+  caloriesKcal: number | null;
+  proteinG: number | null;
+  carbsG: number | null;
+  fatG: number | null;
+  fiberG?: number | null;
+  sugarG?: number | null;
+  sodiumMg?: number | null;
+  confidence: 'low' | 'medium' | 'high';
+  notes: string[];
+};
+
+type MealEntry = {
+  id: string;
+  ts: number;
+  mealType: MealType;
+  sourceText?: string;
+  items: MealItem[];
+};
+
+type DailyLog = {
+  protein: number;
+  proteinEvents: ProteinEvent[];
+  workout: WorkoutState;
+  meals?: MealEntry[];
+};
 
 // --- 2. ข้อมูลตารางฝึก ---
 const SCHEDULE: ScheduleType = {
@@ -141,12 +198,13 @@ function FitnessApp() {
       return {
         protein: 0,
         proteinEvents: [] as ProteinEvent[],
-        workout: makeWorkoutState(todaySchedule.exercises)
+        workout: makeWorkoutState(todaySchedule.exercises),
+        meals: [] as MealEntry[]
       };
     }
     const savedData = localStorage.getItem(storageKey);
     if (savedData) {
-      const parsed = JSON.parse(savedData);
+      const parsed = JSON.parse(savedData) as Partial<DailyLog>;
       const workoutFromStorage = parsed.workout as WorkoutState | undefined;
       const workout = workoutFromStorage && typeof workoutFromStorage === 'object'
         ? workoutFromStorage
@@ -154,13 +212,15 @@ function FitnessApp() {
       return {
         protein: parsed.protein || 0,
         proteinEvents: (parsed.proteinEvents || []) as ProteinEvent[],
-        workout
+        workout,
+        meals: (parsed.meals || []) as MealEntry[]
       };
     }
     return {
       protein: 0,
       proteinEvents: [] as ProteinEvent[],
-      workout: makeWorkoutState(todaySchedule.exercises)
+      workout: makeWorkoutState(todaySchedule.exercises),
+      meals: [] as MealEntry[]
     };
   };
 
@@ -168,12 +228,22 @@ function FitnessApp() {
   const [protein, setProtein] = useState<number>(() => loadInitialData().protein);
   const [proteinEvents, setProteinEvents] = useState<ProteinEvent[]>(() => loadInitialData().proteinEvents);
   const [workoutState, setWorkoutState] = useState<WorkoutState>(() => loadInitialData().workout);
+  const [meals, setMeals] = useState<MealEntry[]>(() => loadInitialData().meals);
 
   const [tipOpen, setTipOpen] = useState<boolean>(false);
   const [showLog, setShowLog] = useState<boolean>(false);
 
+  // --- AI Nutrition (Gemini) ---
+  const [aiOpen, setAiOpen] = useState<boolean>(false);
+  const [aiText, setAiText] = useState<string>('');
+  const [aiImage, setAiImage] = useState<File | null>(null);
+  const [aiLoading, setAiLoading] = useState<boolean>(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiResponse, setAiResponse] = useState<AiNutritionResponse | null>(null);
+  const [aiMealType, setAiMealType] = useState<MealType>('lunch');
+
   // Batch localStorage writes
-  const pendingSaveRef = useRef<{ protein: number; proteinEvents: ProteinEvent[]; workout: WorkoutState } | null>(null);
+  const pendingSaveRef = useRef<DailyLog | null>(null);
   const saveTimerRef = useRef<number | null>(null);
 
   const flushSave = () => {
@@ -187,9 +257,14 @@ function FitnessApp() {
     }
   };
 
-  const scheduleSave = (nextProtein: number, nextEvents: ProteinEvent[], nextWorkout: WorkoutState) => {
+  const scheduleSave = (
+    nextProtein: number,
+    nextEvents: ProteinEvent[],
+    nextWorkout: WorkoutState,
+    nextMeals: MealEntry[] = meals,
+  ) => {
     if (typeof window === 'undefined') return;
-    pendingSaveRef.current = { protein: nextProtein, proteinEvents: nextEvents, workout: nextWorkout };
+    pendingSaveRef.current = { protein: nextProtein, proteinEvents: nextEvents, workout: nextWorkout, meals: nextMeals };
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -210,7 +285,7 @@ function FitnessApp() {
     const newEvents = [newEvent, ...proteinEvents].slice(0, 50);
     setProtein(newProtein);
     setProteinEvents(newEvents);
-    scheduleSave(newProtein, newEvents, workoutState);
+    scheduleSave(newProtein, newEvents, workoutState, meals);
   };
 
   const progress = Math.min((protein / 180) * 100, 100);
@@ -220,7 +295,7 @@ function FitnessApp() {
       const current = prev[exercise] ?? { target: parseWorkoutTarget(exercise), count: 0 };
       const nextCount = Math.max(0, Math.min(current.target, current.count + delta));
       const next = { ...prev, [exercise]: { ...current, count: nextCount } };
-      scheduleSave(protein, proteinEvents, next);
+      scheduleSave(protein, proteinEvents, next, meals);
       return next;
     });
   };
@@ -231,7 +306,7 @@ function FitnessApp() {
     setWorkoutState(prev => {
       const current = prev[exercise] ?? { target: parseWorkoutTarget(exercise), count: 0 };
       const next = { ...prev, [exercise]: { ...current, count: 0 } };
-      scheduleSave(protein, proteinEvents, next);
+      scheduleSave(protein, proteinEvents, next, meals);
       return next;
     });
   };
@@ -241,7 +316,8 @@ function FitnessApp() {
     setProtein(0);
     setProteinEvents([]);
     setWorkoutState(nextWorkout);
-    scheduleSave(0, [], nextWorkout);
+    setMeals([]);
+    scheduleSave(0, [], nextWorkout, []);
   };
 
   const proteinItems = useMemo(() => ([
@@ -249,6 +325,96 @@ function FitnessApp() {
     { label: 'Chicken Breast', grams: 23, icon: Beef, desc: 'Whole food', category: 'whole_food' as const },
     { label: 'Boiled Egg', grams: 7, icon: Egg, desc: 'Snack', category: 'snack' as const }
   ]), []);
+
+  const analyzeNutrition = async () => {
+    setAiError(null);
+    setAiResponse(null);
+    setAiLoading(true);
+    try {
+      const form = new FormData();
+      if (aiText.trim()) form.set('text', aiText.trim());
+      if (aiImage) form.set('image', aiImage);
+
+      const res = await fetch('/api/nutrition', { method: 'POST', body: form });
+      const data = (await res.json()) as AiNutritionResponse;
+      if (!res.ok || !data.ok) {
+        setAiError(data.error || 'Failed to analyze meal.');
+        setAiResponse(data);
+        return;
+      }
+      setAiResponse(data);
+    } catch (e: unknown) {
+      setAiError(e instanceof Error ? e.message : 'Unknown error');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const addProteinFromAi = (r: AiNutritionResult) => {
+    const grams = r.proteinG ?? 0;
+    if (!grams || grams <= 0) return;
+    addProtein({
+      label: `AI: ${r.itemName}`,
+      grams: Math.round(grams),
+      category: 'whole_food'
+    });
+  };
+
+  const saveAiAsMeal = () => {
+    if (!aiResponse?.results || aiResponse.results.length === 0) return;
+    const entry: MealEntry = {
+      id: makeId(),
+      ts: new Date().getTime(),
+      mealType: aiMealType,
+      sourceText: aiText.trim() || undefined,
+      items: aiResponse.results.map((r) => ({
+        itemName: r.itemName,
+        assumedServing: r.assumedServing,
+        caloriesKcal: r.caloriesKcal,
+        proteinG: r.proteinG,
+        carbsG: r.carbsG,
+        fatG: r.fatG,
+        fiberG: r.fiberG,
+        sugarG: r.sugarG,
+        sodiumMg: r.sodiumMg,
+        confidence: r.confidence,
+        notes: r.notes,
+      })),
+    };
+
+    const nextMeals = [entry, ...meals].slice(0, 40);
+    setMeals(nextMeals);
+    scheduleSave(protein, proteinEvents, workoutState, nextMeals);
+  };
+
+  const deleteMeal = (id: string) => {
+    const nextMeals = meals.filter(m => m.id !== id);
+    setMeals(nextMeals);
+    scheduleSave(protein, proteinEvents, workoutState, nextMeals);
+  };
+
+  const mealTotals = useMemo(() => {
+    let caloriesKcal = 0;
+    let proteinG = 0;
+    let carbsG = 0;
+    let fatG = 0;
+
+    for (const meal of meals) {
+      for (const item of meal.items) {
+        caloriesKcal += item.caloriesKcal ?? 0;
+        proteinG += item.proteinG ?? 0;
+        carbsG += item.carbsG ?? 0;
+        fatG += item.fatG ?? 0;
+      }
+    }
+
+    return {
+      caloriesKcal: Math.round(caloriesKcal),
+      proteinG: Math.round(proteinG),
+      carbsG: Math.round(carbsG),
+      fatG: Math.round(fatG),
+    };
+  }, [meals]);
 
   return (
     <div className="min-h-screen font-sans transition-colors duration-300 ease-in-out
@@ -278,6 +444,168 @@ function FitnessApp() {
           bg-[radial-gradient(#000_1px,transparent_1px)] dark:bg-[radial-gradient(rgba(255,255,255,0.18)_1px,transparent_1px)] 
           bg-size-[18px_18px]" />
       </div>
+
+      {/* AI Nutrition — compact card */}
+      <div className="fixed bottom-5 right-5 z-40">
+        <button
+          onClick={() => setAiOpen(v => !v)}
+          className="group flex items-center gap-2 rounded-2xl border border-white/10 bg-white/80 px-4 py-3 text-sm font-semibold shadow-lg backdrop-blur-xl transition hover:bg-white dark:bg-neutral-900/70 dark:hover:bg-neutral-900"
+          aria-label="AI Nutrition"
+        >
+          <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
+          <span className="hidden sm:inline">AI Nutrition</span>
+          <MessageCircle className="h-4 w-4 text-neutral-500 dark:text-neutral-300" />
+        </button>
+      </div>
+
+      <AnimatePresence initial={false}>
+        {aiOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 12, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 12, scale: 0.98 }}
+            transition={{ duration: 0.22, ease: 'easeOut' }}
+            className="fixed bottom-20 right-5 z-40 w-[min(92vw,420px)] overflow-hidden rounded-3xl border border-white/10 bg-white/85 shadow-2xl backdrop-blur-xl dark:bg-neutral-950/80"
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-black/5 px-5 py-4 dark:border-white/10">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-emerald-600 dark:text-emerald-300" />
+                <div>
+                  <div className="text-sm font-bold">AI Nutrition</div>
+                  <div className="text-[11px] text-neutral-500 dark:text-neutral-400">Gemini Pro • text + image • estimate</div>
+                </div>
+              </div>
+              <button
+                onClick={() => setAiOpen(false)}
+                className="rounded-xl px-3 py-2 text-xs font-semibold text-neutral-600 hover:bg-black/5 dark:text-neutral-300 dark:hover:bg-white/5"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="space-y-3 p-5">
+              <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-300">What did you eat?</label>
+              <textarea
+                value={aiText}
+                onChange={(e) => setAiText(e.target.value)}
+                placeholder="เช่น: ข้าวกะเพราไก่ไข่ดาว 1 จาน / เวย์ 1 สกู๊ป + กล้วย 1 ลูก"
+                className="h-24 w-full resize-none rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm outline-none ring-0 focus:border-emerald-400/60 dark:border-white/10 dark:bg-neutral-900/60"
+              />
+
+              <div className="flex items-center justify-between gap-3">
+                <label className="flex cursor-pointer items-center gap-2 rounded-2xl border border-black/10 bg-white/60 px-3 py-2 text-xs font-semibold text-neutral-700 transition hover:bg-white dark:border-white/10 dark:bg-neutral-900/60 dark:text-neutral-200">
+                  <ImageIcon className="h-4 w-4" />
+                  <span>{aiImage ? aiImage.name : 'Add photo (optional)'}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => setAiImage(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+
+                <button
+                  onClick={analyzeNutrition}
+                  disabled={aiLoading || (!aiText.trim() && !aiImage)}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow transition enabled:hover:bg-emerald-500 disabled:opacity-50"
+                >
+                  <Send className="h-4 w-4" />
+                  {aiLoading ? 'Analyzing…' : 'Analyze'}
+                </button>
+              </div>
+
+              {aiError && (
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700 dark:border-rose-500/20 dark:bg-rose-950/30 dark:text-rose-200">
+                  {aiError}
+                </div>
+              )}
+
+              {aiResponse?.results && aiResponse.results.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3 rounded-3xl border border-black/5 bg-white/60 p-3 dark:border-white/10 dark:bg-neutral-900/40">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-bold text-neutral-600 dark:text-neutral-300">Save as:</span>
+                      <select
+                        value={aiMealType}
+                        onChange={(e) => setAiMealType(e.target.value as MealType)}
+                        className="rounded-2xl border border-black/10 bg-white/70 px-3 py-2 text-xs font-semibold text-neutral-800 outline-none dark:border-white/10 dark:bg-neutral-950/50 dark:text-neutral-100"
+                      >
+                        <option value="breakfast">Breakfast</option>
+                        <option value="lunch">Lunch</option>
+                        <option value="dinner">Dinner</option>
+                        <option value="snack">Snack</option>
+                      </select>
+                    </div>
+                    <button
+                      onClick={saveAiAsMeal}
+                      className="inline-flex items-center gap-2 rounded-2xl bg-neutral-900 px-3 py-2 text-xs font-bold text-white transition hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Save meal
+                    </button>
+                  </div>
+
+                  {aiResponse.results.map((r, idx) => (
+                    <div key={idx} className="rounded-3xl border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-neutral-900/50">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-bold">{r.itemName}</div>
+                          <div className="text-[11px] text-neutral-500 dark:text-neutral-400">{r.assumedServing}</div>
+                        </div>
+                        <div className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400">confidence: {r.confidence}</div>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-4 gap-2 text-center">
+                        <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                          <div className="text-[10px] text-neutral-500 dark:text-neutral-400">kcal</div>
+                          <div className="text-sm font-extrabold">{r.caloriesKcal ?? '—'}</div>
+                        </div>
+                        <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                          <div className="text-[10px] text-neutral-500 dark:text-neutral-400">P</div>
+                          <div className="text-sm font-extrabold">{r.proteinG ?? '—'}</div>
+                        </div>
+                        <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                          <div className="text-[10px] text-neutral-500 dark:text-neutral-400">C</div>
+                          <div className="text-sm font-extrabold">{r.carbsG ?? '—'}</div>
+                        </div>
+                        <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                          <div className="text-[10px] text-neutral-500 dark:text-neutral-400">F</div>
+                          <div className="text-sm font-extrabold">{r.fatG ?? '—'}</div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 flex items-center justify-between gap-2">
+                        <div className="text-[11px] text-neutral-500 dark:text-neutral-400 line-clamp-2">
+                          {r.notes?.[0] ?? 'Tip: Specify portion size for better accuracy.'}
+                        </div>
+                        <button
+                          onClick={() => addProteinFromAi(r)}
+                          disabled={!r.proteinG || r.proteinG <= 0}
+                          className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-500/20 dark:bg-emerald-950/30 dark:text-emerald-200"
+                        >
+                          <Plus className="h-4 w-4" />
+                          Add protein
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {aiResponse.followUpQuestions && aiResponse.followUpQuestions.length > 0 && (
+                    <div className="rounded-3xl border border-black/5 bg-white/60 p-4 text-xs text-neutral-700 dark:border-white/10 dark:bg-neutral-900/40 dark:text-neutral-200">
+                      <div className="mb-2 font-bold text-[11px] text-neutral-500 dark:text-neutral-400">To be more accurate:</div>
+                      <ul className="list-disc pl-5 space-y-1">
+                        {aiResponse.followUpQuestions.slice(0, 4).map((q, i) => (
+                          <li key={i}>{q}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Navbar */}
       <nav className="sticky top-0 z-50 px-6 py-4 
@@ -325,6 +653,109 @@ function FitnessApp() {
       </nav>
 
       <main className="max-w-6xl mx-auto p-4 md:p-6 space-y-6">
+
+        {/* Meals & Nutrition (AI history) */}
+        <section className="grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6">
+          <div className="md:col-span-5 rounded-3xl border border-gray-200 bg-white/60 p-5 backdrop-blur-md dark:border-white/10 dark:bg-white/5">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-bold text-gray-900 dark:text-white">Today&apos;s Nutrition</div>
+                <div className="text-xs text-gray-500 dark:text-neutral-400">From saved meals (AI)</div>
+              </div>
+              <div className="text-[11px] font-semibold text-gray-400 dark:text-neutral-500">{meals.length} meals</div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-4 gap-2 text-center">
+              <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                <div className="text-[10px] text-gray-500 dark:text-neutral-400">kcal</div>
+                <div className="text-sm font-extrabold text-gray-900 dark:text-white">{mealTotals.caloriesKcal}</div>
+              </div>
+              <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                <div className="text-[10px] text-gray-500 dark:text-neutral-400">P</div>
+                <div className="text-sm font-extrabold text-gray-900 dark:text-white">{mealTotals.proteinG}</div>
+              </div>
+              <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                <div className="text-[10px] text-gray-500 dark:text-neutral-400">C</div>
+                <div className="text-sm font-extrabold text-gray-900 dark:text-white">{mealTotals.carbsG}</div>
+              </div>
+              <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                <div className="text-[10px] text-gray-500 dark:text-neutral-400">F</div>
+                <div className="text-sm font-extrabold text-gray-900 dark:text-white">{mealTotals.fatG}</div>
+              </div>
+            </div>
+
+            <div className="mt-4 text-xs text-gray-500 dark:text-neutral-400">
+              Tip: Save meals from AI Nutrition (bottom-right) to build accurate day totals.
+            </div>
+          </div>
+
+          <div className="md:col-span-7 rounded-3xl border border-gray-200 bg-white/60 p-5 backdrop-blur-md dark:border-white/10 dark:bg-white/5">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-bold text-gray-900 dark:text-white">Meal history</div>
+              <button
+                onClick={() => setAiOpen(true)}
+                className="rounded-2xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500"
+              >
+                Add meal
+              </button>
+            </div>
+
+            {meals.length === 0 ? (
+              <div className="mt-3 rounded-2xl border border-dashed border-gray-300 p-4 text-xs text-gray-500 dark:border-white/10 dark:text-neutral-400">
+                No meals saved yet.
+              </div>
+            ) : (
+              <div className="mt-3 space-y-3">
+                {meals.slice(0, 8).map((m) => {
+                  const kcal = m.items.reduce((s, it) => s + (it.caloriesKcal ?? 0), 0);
+                  const p = m.items.reduce((s, it) => s + (it.proteinG ?? 0), 0);
+                  const c = m.items.reduce((s, it) => s + (it.carbsG ?? 0), 0);
+                  const f = m.items.reduce((s, it) => s + (it.fatG ?? 0), 0);
+
+                  return (
+                    <div key={m.id} className="rounded-3xl border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-neutral-900/40">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-xs font-bold text-gray-900 dark:text-white">
+                            {m.mealType.toUpperCase()} • {new Date(m.ts).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                          <div className="mt-1 text-[11px] text-gray-500 dark:text-neutral-400 line-clamp-2">
+                            {m.items.map(it => it.itemName).join(' + ')}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => deleteMeal(m.id)}
+                          className="rounded-2xl px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-950/30"
+                        >
+                          Delete
+                        </button>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-4 gap-2 text-center">
+                        <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                          <div className="text-[10px] text-gray-500 dark:text-neutral-400">kcal</div>
+                          <div className="text-sm font-extrabold">{Math.round(kcal)}</div>
+                        </div>
+                        <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                          <div className="text-[10px] text-gray-500 dark:text-neutral-400">P</div>
+                          <div className="text-sm font-extrabold">{Math.round(p)}</div>
+                        </div>
+                        <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                          <div className="text-[10px] text-gray-500 dark:text-neutral-400">C</div>
+                          <div className="text-sm font-extrabold">{Math.round(c)}</div>
+                        </div>
+                        <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                          <div className="text-[10px] text-gray-500 dark:text-neutral-400">F</div>
+                          <div className="text-sm font-extrabold">{Math.round(f)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
 
         {/* Hero Section */}
         <header className="py-6 md:py-10">
