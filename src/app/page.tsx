@@ -241,7 +241,7 @@ function FitnessApp() {
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiResponse, setAiResponse] = useState<AiNutritionResponse | null>(null);
   const [aiMealType, setAiMealType] = useState<MealType>('lunch');
-  const lastAiProteinCreditRef = useRef<string | null>(null);
+  const lastAiMealProteinCreditRef = useRef<string | null>(null);
 
   // Batch localStorage writes
   const pendingSaveRef = useRef<DailyLog | null>(null);
@@ -344,22 +344,6 @@ function FitnessApp() {
         return;
       }
       setAiResponse(data);
-
-      // Auto-credit protein to Daily Protein (once per analysis), so users don't have to manually add it.
-      const fingerprint = `${aiText.trim()}::${data.results?.map(r => `${r.itemName}:${r.proteinG ?? 0}`).join('|') ?? ''}`;
-      if (lastAiProteinCreditRef.current !== fingerprint) {
-        lastAiProteinCreditRef.current = fingerprint;
-        const totalProtein = Math.round(
-          (data.results ?? []).reduce((sum, r) => sum + (r.proteinG ?? 0), 0),
-        );
-        if (totalProtein > 0) {
-          addProtein({
-            label: `AI: ${(data.results?.[0]?.itemName ?? 'มื้ออาหาร')}`,
-            grams: totalProtein,
-            category: 'whole_food',
-          });
-        }
-      }
     } catch (e: unknown) {
       setAiError(e instanceof Error ? e.message : 'Unknown error');
     } finally {
@@ -379,6 +363,23 @@ function FitnessApp() {
 
   const saveAiAsMeal = () => {
     if (!aiResponse?.results || aiResponse.results.length === 0) return;
+
+    // Credit total protein ONLY when saving the meal, not on analyze.
+    const proteinFingerprint = `${aiMealType}::${aiText.trim()}::${aiResponse.results
+      .map(r => `${r.itemName}:${r.proteinG ?? 0}`)
+      .join('|')}`;
+    if (lastAiMealProteinCreditRef.current !== proteinFingerprint) {
+      lastAiMealProteinCreditRef.current = proteinFingerprint;
+      const totalProtein = Math.round(aiResponse.results.reduce((sum, r) => sum + (r.proteinG ?? 0), 0));
+      if (totalProtein > 0) {
+        addProtein({
+          label: `AI meal: ${aiResponse.results[0]?.itemName ?? 'มื้ออาหาร'}`,
+          grams: totalProtein,
+          category: 'whole_food',
+        });
+      }
+    }
+
     const entry: MealEntry = {
       id: makeId(),
       ts: new Date().getTime(),
@@ -534,6 +535,21 @@ function FitnessApp() {
                 </label>
 
                 <button
+                  type="button"
+                  onClick={() => {
+                    setAiText('');
+                    setAiImage(null);
+                    setAiError(null);
+                    setAiResponse(null);
+                    lastAiMealProteinCreditRef.current = null;
+                  }}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-black/10 bg-white/60 px-4 py-2 text-xs font-bold text-neutral-700 transition hover:bg-white disabled:opacity-50 dark:border-white/10 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-900"
+                  disabled={aiLoading && !aiResponse}
+                >
+                  Clear
+                </button>
+
+                <button
                   onClick={analyzeNutrition}
                   disabled={aiLoading || (!aiText.trim() && !aiImage)}
                   className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow transition enabled:hover:bg-emerald-500 disabled:opacity-50"
@@ -609,7 +625,7 @@ function FitnessApp() {
                         </div>
                         <button
                           onClick={() => addProteinFromAi(r)}
-                          disabled={!r.proteinG || r.proteinG <= 0 || (aiResponse?.results ?? []).some(x => (x.proteinG ?? 0) > 0)}
+                          disabled={!r.proteinG || r.proteinG <= 0}
                           className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-500/20 dark:bg-emerald-950/30 dark:text-emerald-200"
                         >
                           <Plus className="h-4 w-4" />
