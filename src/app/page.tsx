@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -73,6 +73,11 @@ function FitnessApp() {
     return String(new Date().getTime());
   };
 
+  const isMobile = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia?.('(max-width: 767px)')?.matches ?? false;
+  }, []);
+
   const parseWorkoutTarget = (exerciseLabel: string) => {
     const m = /\((\d+)x/i.exec(exerciseLabel);
     if (!m) return 1;
@@ -116,7 +121,7 @@ function FitnessApp() {
     };
   };
 
-  // Lazy init: runs only on first client render, avoids setState-in-effect warnings
+  // Lazy init: runs only on first client render
   const [protein, setProtein] = useState<number>(() => loadInitialData().protein);
   const [proteinEvents, setProteinEvents] = useState<ProteinEvent[]>(() => loadInitialData().proteinEvents);
   const [workoutState, setWorkoutState] = useState<WorkoutState>(() => loadInitialData().workout);
@@ -124,9 +129,33 @@ function FitnessApp() {
   const [tipOpen, setTipOpen] = useState<boolean>(false);
   const [showLog, setShowLog] = useState<boolean>(false);
 
-  const saveData = (newProtein: number, newProteinEvents: ProteinEvent[], newWorkout: WorkoutState) => {
-    const dataToSave = { protein: newProtein, proteinEvents: newProteinEvents, workout: newWorkout };
-    localStorage.setItem(storageKey, JSON.stringify(dataToSave));
+  // Batch localStorage writes (mobile-friendly)
+  const pendingSaveRef = useRef<{ protein: number; proteinEvents: ProteinEvent[]; workout: WorkoutState } | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
+
+  const flushSave = () => {
+    if (typeof window === 'undefined') return;
+    if (!pendingSaveRef.current) return;
+    localStorage.setItem(storageKey, JSON.stringify(pendingSaveRef.current));
+    pendingSaveRef.current = null;
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+  };
+
+  const scheduleSave = (nextProtein: number, nextEvents: ProteinEvent[], nextWorkout: WorkoutState) => {
+    if (typeof window === 'undefined') return;
+    pendingSaveRef.current = { protein: nextProtein, proteinEvents: nextEvents, workout: nextWorkout };
+    // Debounce a bit to avoid writing for every tap.
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      // Prefer idle time when available.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ric = (window as any).requestIdleCallback as undefined | ((cb: () => void, opts?: { timeout: number }) => number);
+      if (ric) ric(flushSave, { timeout: 800 });
+      else flushSave();
+    }, 250);
   };
 
   const addProtein = (event: Omit<ProteinEvent, 'id' | 'ts'>) => {
@@ -140,7 +169,7 @@ function FitnessApp() {
     const newEvents = [newEvent, ...proteinEvents].slice(0, 50);
     setProtein(newProtein);
     setProteinEvents(newEvents);
-    saveData(newProtein, newEvents, workoutState);
+    scheduleSave(newProtein, newEvents, workoutState);
   };
 
   const progress = Math.min((protein / 180) * 100, 100);
@@ -150,20 +179,18 @@ function FitnessApp() {
       const current = prev[exercise] ?? { target: parseWorkoutTarget(exercise), count: 0 };
       const nextCount = Math.max(0, Math.min(current.target, current.count + delta));
       const next = { ...prev, [exercise]: { ...current, count: nextCount } };
-      saveData(protein, proteinEvents, next);
+      scheduleSave(protein, proteinEvents, next);
       return next;
     });
   };
 
-  const incrementExercise = (exercise: string) => {
-    bumpExercise(exercise, 1);
-  };
+  const incrementExercise = (exercise: string) => bumpExercise(exercise, 1);
 
   const resetExercise = (exercise: string) => {
     setWorkoutState(prev => {
       const current = prev[exercise] ?? { target: parseWorkoutTarget(exercise), count: 0 };
       const next = { ...prev, [exercise]: { ...current, count: 0 } };
-      saveData(protein, proteinEvents, next);
+      scheduleSave(protein, proteinEvents, next);
       return next;
     });
   };
@@ -173,8 +200,14 @@ function FitnessApp() {
     setProtein(0);
     setProteinEvents([]);
     setWorkoutState(nextWorkout);
-    saveData(0, [], nextWorkout);
+    scheduleSave(0, [], nextWorkout);
   };
+
+  const proteinItems = useMemo(() => ([
+    { label: 'Whey Scoop', grams: 25, icon: Milk, desc: 'Supplement', category: 'supplement' as const },
+    { label: 'Chicken Breast', grams: 23, icon: Beef, desc: 'Whole food', category: 'whole_food' as const },
+    { label: 'Boiled Egg', grams: 7, icon: Egg, desc: 'Snack', category: 'snack' as const }
+  ]), []);
 
   return (
     <div className="min-h-screen font-sans text-neutral-100 selection:bg-emerald-500/30 selection:text-emerald-200 pb-20 relative overflow-hidden">
@@ -207,7 +240,7 @@ function FitnessApp() {
         {/* Hero Section */}
         <header className="py-6 md:py-10">
           <motion.div 
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: isMobile ? 8 : 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="flex flex-col md:flex-row md:items-end justify-between gap-4"
           >
@@ -260,16 +293,15 @@ function FitnessApp() {
             </div>
 
             <div className="grid gap-3">
-              <AnimatePresence>
                 {todaySchedule.exercises.map((ex, index) => {
                   const item = workoutState[ex] ?? { target: parseWorkoutTarget(ex), count: 0 };
                   const done = item.count >= item.target;
                   return (
                     <motion.div
                       key={index}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.05 }}
+                      initial={false}
+                      animate={false}
+                      transition={undefined}
                       onClick={() => incrementExercise(ex)}
                       className={`
                         group relative p-5 rounded-2xl cursor-pointer border transition-all duration-200
@@ -311,7 +343,6 @@ function FitnessApp() {
                     </motion.div>
                   );
                 })}
-              </AnimatePresence>
             </div>
           </div>
 
@@ -353,12 +384,7 @@ function FitnessApp() {
               </div>
               
               <div className="grid grid-cols-1 gap-3">
-                {[
-                  // Phone-first request: show protein add actions first, and ordered by typical use
-                  { label: "Whey Scoop", grams: 25, icon: Milk, desc: "Supplement", category: 'supplement' as const },
-                  { label: "Chicken Breast", grams: 23, icon: Beef, desc: "Whole food", category: 'whole_food' as const },
-                  { label: "Boiled Egg", grams: 7, icon: Egg, desc: "Snack", category: 'snack' as const },
-                ].map((item, idx) => (
+                {proteinItems.map((item, idx) => (
                   <button
                     key={idx}
                     onClick={() => addProtein({ label: item.label, grams: item.grams, category: item.category })}
