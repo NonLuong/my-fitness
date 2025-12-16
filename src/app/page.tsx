@@ -489,6 +489,18 @@ function FitnessApp() {
                 value={aiText}
                 onChange={(e) => setAiText(e.target.value)}
                 placeholder="เช่น: ข้าวกะเพราไก่ไข่ดาว 1 จาน / เวย์ 1 สกู๊ป + กล้วย 1 ลูก"
+                onKeyDown={(e) => {
+                  // Chat-like UX:
+                  // - Enter: send
+                  // - Shift+Enter: new line
+                  // Note: "Spacebar+Enter" isn't a reliable/standard modifier across browsers/keyboards.
+                  if (e.key !== 'Enter') return;
+                  if (e.shiftKey) return;
+                  e.preventDefault();
+                  if (aiLoading) return;
+                  if (!aiText.trim() && !aiImage) return;
+                  void analyzeNutrition();
+                }}
                 className="h-24 w-full resize-none rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm outline-none ring-0 focus:border-emerald-400/60 dark:border-white/10 dark:bg-neutral-900/60"
               />
 
