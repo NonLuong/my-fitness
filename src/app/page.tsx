@@ -241,6 +241,7 @@ function FitnessApp() {
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiResponse, setAiResponse] = useState<AiNutritionResponse | null>(null);
   const [aiMealType, setAiMealType] = useState<MealType>('lunch');
+  const lastAiProteinCreditRef = useRef<string | null>(null);
 
   // Batch localStorage writes
   const pendingSaveRef = useRef<DailyLog | null>(null);
@@ -343,6 +344,22 @@ function FitnessApp() {
         return;
       }
       setAiResponse(data);
+
+      // Auto-credit protein to Daily Protein (once per analysis), so users don't have to manually add it.
+      const fingerprint = `${aiText.trim()}::${data.results?.map(r => `${r.itemName}:${r.proteinG ?? 0}`).join('|') ?? ''}`;
+      if (lastAiProteinCreditRef.current !== fingerprint) {
+        lastAiProteinCreditRef.current = fingerprint;
+        const totalProtein = Math.round(
+          (data.results ?? []).reduce((sum, r) => sum + (r.proteinG ?? 0), 0),
+        );
+        if (totalProtein > 0) {
+          addProtein({
+            label: `AI: ${(data.results?.[0]?.itemName ?? 'มื้ออาหาร')}`,
+            grams: totalProtein,
+            category: 'whole_food',
+          });
+        }
+      }
     } catch (e: unknown) {
       setAiError(e instanceof Error ? e.message : 'Unknown error');
     } finally {
@@ -592,7 +609,7 @@ function FitnessApp() {
                         </div>
                         <button
                           onClick={() => addProteinFromAi(r)}
-                          disabled={!r.proteinG || r.proteinG <= 0}
+                          disabled={!r.proteinG || r.proteinG <= 0 || (aiResponse?.results ?? []).some(x => (x.proteinG ?? 0) > 0)}
                           className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-500/20 dark:bg-emerald-950/30 dark:text-emerald-200"
                         >
                           <Plus className="h-4 w-4" />
