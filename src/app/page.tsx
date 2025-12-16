@@ -474,12 +474,12 @@ function FitnessApp() {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 12, scale: 0.98 }}
               transition={{ duration: 0.22, ease: 'easeOut' }}
-              className="fixed bottom-20 right-5 z-40 w-[min(92vw,420px)] overflow-hidden rounded-3xl border border-white/10 bg-white/85 shadow-2xl backdrop-blur-xl dark:bg-neutral-950/80"
+              className="fixed bottom-20 right-5 z-40 w-[min(92vw,420px)] max-h-[min(78vh,720px)] overflow-hidden rounded-3xl border border-white/10 bg-white/85 shadow-2xl backdrop-blur-xl dark:bg-neutral-950/80"
               onClick={(e) => e.stopPropagation()}
               role="dialog"
               aria-label="AI Nutrition"
             >
-              <div className="flex items-center justify-between gap-3 border-b border-black/5 px-5 py-4 dark:border-white/10">
+              <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-black/5 bg-white/85 px-5 py-4 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-950/80">
                 <div className="flex items-center gap-2">
                   <Sparkles className="h-5 w-5 text-emerald-600 dark:text-emerald-300" />
                   <div>
@@ -495,7 +495,8 @@ function FitnessApp() {
                 </button>
               </div>
 
-              <div className="space-y-3 p-5">
+              <div className="max-h-[calc(min(78vh,720px)-64px)] overflow-y-auto overscroll-contain p-5">
+                <div className="space-y-3">
                 <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-300">What did you eat?</label>
                 <textarea
                   value={aiText}
@@ -689,6 +690,7 @@ function FitnessApp() {
                     </div>
                   </div>
                 )}
+                </div>
               </div>
             </motion.div>
           </motion.div>
