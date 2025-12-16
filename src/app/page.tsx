@@ -555,6 +555,112 @@ function FitnessApp() {
 
                 {aiResponse?.results && aiResponse.results.length > 0 && (
                   <div className="space-y-3">
+                    <div className="rounded-3xl border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-neutral-900/40">
+                      <div className="text-xs font-extrabold text-gray-900 dark:text-white">ผลการวิเคราะห์โภชนาการ</div>
+                      {aiResponse.reasoningSummary && (
+                        <div className="mt-1 text-[11px] text-gray-500 dark:text-neutral-400">
+                          {aiResponse.reasoningSummary}
+                        </div>
+                      )}
+
+                      <div className="mt-3 space-y-3">
+                        {aiResponse.results.map((r, idx) => (
+                          <div
+                            key={`${r.itemName}-${idx}`}
+                            className="rounded-3xl border border-black/5 bg-white/65 p-4 dark:border-white/10 dark:bg-neutral-950/25"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-extrabold tracking-tight text-gray-900 dark:text-white">
+                                  {r.itemName}
+                                </div>
+                                <div className="mt-0.5 text-[11px] text-gray-500 dark:text-neutral-400">
+                                  {r.assumedServing}
+                                </div>
+                              </div>
+                              <div
+                                className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold ${
+                                  r.confidence === 'high'
+                                    ? 'bg-emerald-600/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200'
+                                    : r.confidence === 'low'
+                                      ? 'bg-amber-600/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200'
+                                      : 'bg-sky-600/10 text-sky-700 dark:bg-sky-500/15 dark:text-sky-200'
+                                }`}
+                              >
+                                ความมั่นใจ: {r.confidence === 'high' ? 'สูง' : r.confidence === 'low' ? 'ต่ำ' : 'ปานกลาง'}
+                              </div>
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-4 gap-2 text-center">
+                              <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                                <div className="text-[10px] text-gray-500 dark:text-neutral-400">kcal</div>
+                                <div className="text-sm font-extrabold text-gray-900 dark:text-white">
+                                  {r.caloriesKcal ?? '-'}
+                                </div>
+                              </div>
+                              <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                                <div className="text-[10px] text-gray-500 dark:text-neutral-400">โปรตีน</div>
+                                <div className="text-sm font-extrabold text-gray-900 dark:text-white">
+                                  {r.proteinG ?? '-'}
+                                </div>
+                              </div>
+                              <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                                <div className="text-[10px] text-gray-500 dark:text-neutral-400">คาร์บ</div>
+                                <div className="text-sm font-extrabold text-gray-900 dark:text-white">
+                                  {r.carbsG ?? '-'}
+                                </div>
+                              </div>
+                              <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                                <div className="text-[10px] text-gray-500 dark:text-neutral-400">ไขมัน</div>
+                                <div className="text-sm font-extrabold text-gray-900 dark:text-white">
+                                  {r.fatG ?? '-'}
+                                </div>
+                              </div>
+                            </div>
+
+                            {(r.fiberG != null || r.sugarG != null || r.sodiumMg != null) && (
+                              <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                                <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                                  <div className="text-[10px] text-gray-500 dark:text-neutral-400">ใยอาหาร</div>
+                                  <div className="text-xs font-bold text-gray-900 dark:text-white">{r.fiberG ?? '-'}</div>
+                                </div>
+                                <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                                  <div className="text-[10px] text-gray-500 dark:text-neutral-400">น้ำตาล</div>
+                                  <div className="text-xs font-bold text-gray-900 dark:text-white">{r.sugarG ?? '-'}</div>
+                                </div>
+                                <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
+                                  <div className="text-[10px] text-gray-500 dark:text-neutral-400">โซเดียม (mg)</div>
+                                  <div className="text-xs font-bold text-gray-900 dark:text-white">{r.sodiumMg ?? '-'}</div>
+                                </div>
+                              </div>
+                            )}
+
+                            {Array.isArray(r.notes) && r.notes.length > 0 && (
+                              <div className="mt-3 rounded-2xl border border-black/5 bg-white/70 px-3 py-2 text-[11px] text-gray-600 dark:border-white/10 dark:bg-neutral-950/30 dark:text-neutral-300">
+                                <div className="font-bold">หมายเหตุ</div>
+                                <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                                  {r.notes.map((n, i) => (
+                                    <li key={i}>{n}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {aiResponse.followUpQuestions && aiResponse.followUpQuestions.length > 0 && (
+                      <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-[11px] text-amber-800 dark:border-amber-500/20 dark:bg-amber-950/30 dark:text-amber-200">
+                        <div className="text-xs font-extrabold">คำถามเพิ่มเติม (เพื่อความแม่นยำ)</div>
+                        <ul className="mt-2 list-disc space-y-1 pl-4">
+                          {aiResponse.followUpQuestions.map((q, i) => (
+                            <li key={i}>{q}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between gap-3 rounded-3xl border border-black/5 bg-white/60 p-3 dark:border-white/10 dark:bg-neutral-900/40">
                       <div className="flex items-center gap-2">
                         <span className="text-[11px] font-bold text-neutral-600 dark:text-neutral-300">Save as:</span>
