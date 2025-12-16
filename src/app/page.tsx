@@ -479,29 +479,45 @@ function FitnessApp() {
       <AnimatePresence initial={false}>
         {aiOpen && (
           <motion.div
-            initial={{ opacity: 0, y: 12, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 12, scale: 0.98 }}
-            transition={{ duration: 0.22, ease: 'easeOut' }}
-            className="fixed bottom-20 right-5 z-40 w-[min(92vw,420px)] overflow-hidden rounded-3xl border border-white/10 bg-white/85 shadow-2xl backdrop-blur-xl dark:bg-neutral-950/80"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18, ease: 'easeOut' }}
+            className="fixed inset-0 z-40"
+            onClick={() => setAiOpen(false)}
+            aria-hidden
           >
-            <div className="flex items-center justify-between gap-3 border-b border-black/5 px-5 py-4 dark:border-white/10">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-5 w-5 text-emerald-600 dark:text-emerald-300" />
-                <div>
-                  <div className="text-sm font-bold">AI Nutrition</div>
-                  <div className="text-[11px] text-neutral-500 dark:text-neutral-400">Gemini Pro • text + image • estimate</div>
-                </div>
-              </div>
-              <button
-                onClick={() => setAiOpen(false)}
-                className="rounded-xl px-3 py-2 text-xs font-semibold text-neutral-600 hover:bg-black/5 dark:text-neutral-300 dark:hover:bg-white/5"
-              >
-                Close
-              </button>
-            </div>
+            {/* Backdrop (click outside to close) */}
+            <div className="absolute inset-0 bg-black/10 dark:bg-black/40" />
 
-            <div className="space-y-3 p-5">
+            {/* Panel */}
+            <motion.div
+              initial={{ opacity: 0, y: 12, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.98 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+              className="fixed bottom-20 right-5 z-40 w-[min(92vw,420px)] overflow-hidden rounded-3xl border border-white/10 bg-white/85 shadow-2xl backdrop-blur-xl dark:bg-neutral-950/80"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-label="AI Nutrition"
+            >
+              <div className="flex items-center justify-between gap-3 border-b border-black/5 px-5 py-4 dark:border-white/10">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-5 w-5 text-emerald-600 dark:text-emerald-300" />
+                  <div>
+                    <div className="text-sm font-bold">AI Nutrition</div>
+                    <div className="text-[11px] text-neutral-500 dark:text-neutral-400">Gemini Pro • text + image • estimate</div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setAiOpen(false)}
+                  className="rounded-xl px-3 py-2 text-xs font-semibold text-neutral-600 hover:bg-black/5 dark:text-neutral-300 dark:hover:bg-white/5"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="space-y-3 p-5">
               <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-300">What did you eat?</label>
               <textarea
                 value={aiText}
@@ -647,7 +663,8 @@ function FitnessApp() {
                   )}
                 </div>
               )}
-            </div>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
