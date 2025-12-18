@@ -952,6 +952,24 @@ function FitnessApp() {
 
   <main className="max-w-6xl mx-auto p-4 md:p-6 space-y-6">
 
+        <div className="rounded-3xl border border-black/5 bg-white/60 p-4 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-white/5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-[11px] font-semibold tracking-wide text-gray-500 dark:text-neutral-400">ใหม่</div>
+              <div className="text-sm font-extrabold text-neutral-900 dark:text-white">โค้ชส่วนตัว (BMI • แคล/วัน • แผน 7 วัน)</div>
+              <div className="mt-0.5 text-xs text-neutral-600 dark:text-neutral-300">กรอกข้อมูลรอบตัวเป็น “นิ้ว” แล้วให้โค้ชช่วยวางแผนให้</div>
+            </div>
+
+            <a
+              href="/coach"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-neutral-900 px-4 py-3 text-sm font-extrabold text-white transition hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
+            >
+              <Sparkles className="h-4 w-4" />
+              ไปหน้าโค้ช
+            </a>
+          </div>
+        </div>
+
         <MobileTabs
           value={mobileTab}
           onChange={setMobileTab}
