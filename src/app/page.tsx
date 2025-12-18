@@ -297,16 +297,17 @@ function FitnessApp() {
   const [aiMealType, setAiMealType] = useState<MealType>('lunch');
   const lastAiMealProteinCreditRef = useRef<string | null>(null);
 
-  // --- Toasts (lightweight local UI feedback) ---
-  type Toast = { id: string; title: string; description?: string };
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  // --- Save success popup ---
+  const [saveSuccessOpen, setSaveSuccessOpen] = useState<boolean>(false);
+  const saveSuccessTimerRef = useRef<number | null>(null);
 
-  const pushToast = (t: Omit<Toast, 'id'>, opts?: { durationMs?: number }) => {
-    const id = makeId();
-    const durationMs = opts?.durationMs ?? 2200;
-    setToasts((prev) => [...prev, { id, ...t }].slice(-3));
-    window.setTimeout(() => {
-      setToasts((prev) => prev.filter((x) => x.id !== id));
+  const openSaveSuccess = (opts?: { durationMs?: number }) => {
+    const durationMs = opts?.durationMs ?? 1800;
+    setSaveSuccessOpen(true);
+    if (saveSuccessTimerRef.current) window.clearTimeout(saveSuccessTimerRef.current);
+    saveSuccessTimerRef.current = window.setTimeout(() => {
+      setSaveSuccessOpen(false);
+      saveSuccessTimerRef.current = null;
     }, durationMs);
   };
 
@@ -458,7 +459,7 @@ function FitnessApp() {
       setAiImage(null);
       setAiError(null);
       setAiResponse(null);
-      pushToast({ title: 'บันทึกแล้ว', description: 'เพิ่มลงใน Meals ของวันนี้แล้ว' });
+      openSaveSuccess();
     }, 0);
   };
 
@@ -794,33 +795,77 @@ function FitnessApp() {
         )}
       </AnimatePresence>
 
-      {/* Toasts */}
-  <div className="pointer-events-none fixed bottom-6 left-1/2 z-80 flex w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 flex-col gap-2">
-        <AnimatePresence>
-          {toasts.map((t) => (
+      {/* Save success popup (center) */}
+      <AnimatePresence>
+        {saveSuccessOpen && (
+          <motion.div
+            className="fixed inset-0 z-80 flex items-center justify-center"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
             <motion.div
-              key={t.id}
-              initial={{ opacity: 0, y: 8, scale: 0.98 }}
+              className="absolute inset-0 bg-black/35 backdrop-blur-[2px]"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSaveSuccessOpen(false)}
+            />
+
+            <motion.div
+              initial={{ opacity: 0, y: 12, scale: 0.96 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8, scale: 0.98 }}
-              transition={{ duration: 0.18 }}
-              className="pointer-events-auto rounded-3xl border border-black/10 bg-white/90 px-4 py-3 shadow-xl shadow-black/5 backdrop-blur dark:border-white/10 dark:bg-neutral-950/80"
+              exit={{ opacity: 0, y: 12, scale: 0.98 }}
+              transition={{ type: 'spring', stiffness: 520, damping: 38 }}
+              className="relative mx-4 w-[min(520px,calc(100vw-2rem))] overflow-hidden rounded-[28px] border border-white/20 bg-white/85 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-950/70"
+              role="status"
+              aria-live="polite"
             >
-              <div className="flex items-start gap-3">
-                <div className="mt-0.5 inline-flex h-8 w-8 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-300">
-                  <CheckCircle2 className="h-4 w-4" />
-                </div>
+              {/* Subtle premium gradient */}
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_0%,rgba(16,185,129,0.22),transparent_60%),radial-gradient(60%_60%_at_0%_100%,rgba(59,130,246,0.16),transparent_55%)]" />
+
+              <div className="relative flex items-center gap-4">
+                <motion.div
+                  initial={{ rotate: -12, scale: 0.9, opacity: 0 }}
+                  animate={{ rotate: 0, scale: 1, opacity: 1 }}
+                  transition={{ type: 'spring', stiffness: 560, damping: 26, delay: 0.05 }}
+                  className="grid h-14 w-14 place-items-center rounded-3xl bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/20 dark:bg-emerald-400/10 dark:text-emerald-200 dark:ring-emerald-400/20"
+                >
+                  <CheckCircle2 className="h-7 w-7" />
+                </motion.div>
+
                 <div className="min-w-0 flex-1">
-                  <div className="text-xs font-extrabold text-neutral-900 dark:text-white">{t.title}</div>
-                  {t.description && (
-                    <div className="mt-0.5 text-[11px] text-neutral-600 dark:text-neutral-300">{t.description}</div>
-                  )}
+                  <div className="text-sm font-extrabold tracking-tight text-neutral-900 dark:text-white">
+                    บันทึกสำเร็จ
+                  </div>
+                  <div className="mt-0.5 text-xs text-neutral-600 dark:text-neutral-300">
+                    เพิ่มรายการอาหารลงใน Meals ของวันนี้แล้ว
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSaveSuccessOpen(false)}
+                  className="rounded-2xl border border-black/10 bg-white/70 px-3 py-2 text-[11px] font-bold text-neutral-800 transition hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-neutral-100 dark:hover:bg-white/10"
+                >
+                  ปิด
+                </button>
+              </div>
+
+              <div className="relative mt-4">
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-black/5 dark:bg-white/10">
+                  <motion.div
+                    className="h-full rounded-full bg-emerald-500/80"
+                    initial={{ width: '0%' }}
+                    animate={{ width: '100%' }}
+                    transition={{ duration: 1.4, ease: 'easeOut' }}
+                  />
                 </div>
               </div>
             </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <ConfirmDialog
         open={confirmResetOpen}
