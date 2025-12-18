@@ -46,6 +46,137 @@ type GeminiResultItem = {
   notes?: unknown;
 };
 
+type FallbackEstimate = {
+  itemName: string;
+  assumedServing: string;
+  caloriesKcal: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+  fiberG?: number;
+  sugarG?: number;
+  sodiumMg?: number;
+  confidence: NutritionResult['confidence'];
+  notes: string[];
+};
+
+function clampNonNegative(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return n < 0 ? 0 : n;
+}
+
+function maybeParseGrams(raw: string): number | null {
+  const m = /(?:^|\s)(\d+(?:\.\d+)?)\s*(?:g\b|กรัม)\b/i.exec(raw);
+  if (!m?.[1]) return null;
+  const v = Number(m[1]);
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+function estimateFromParsedItems(
+  pre: ReturnType<typeof preprocessThaiMeal> | null,
+  userText: string,
+): FallbackEstimate[] {
+  if (!pre) return [];
+
+  // Lightweight, conservative fallbacks (per "standard serving" or explicit grams if present)
+  // Notes: These are intentionally rough but stable.
+  const out: FallbackEstimate[] = [];
+
+  for (const it of pre.items) {
+    const name = it.name;
+    const raw = it.raw;
+    const qty = Number.isFinite(it.qty) && it.qty > 0 ? it.qty : 1;
+
+    // Eggs
+    if (name.includes('ไข่')) {
+      // 1 egg ~ 70 kcal, P 6g, F 5g, C 0.5g
+      const per = { kcal: 70, p: 6, c: 0.5, f: 5 };
+      const mult = qty;
+      out.push({
+        itemName: name.includes('ไข่ดาว') ? 'ไข่ดาว' : name.includes('ไข่ต้ม') ? 'ไข่ต้ม' : 'ไข่',
+        assumedServing: `${qty} ${it.unit ?? 'ฟอง'}`,
+        caloriesKcal: Math.round(per.kcal * mult),
+        proteinG: Math.round(per.p * mult),
+        carbsG: Math.round(per.c * mult),
+        fatG: Math.round(per.f * mult),
+        confidence: 'high',
+        notes: ['คำนวณแบบประมาณจากไข่ไก่มาตรฐานต่อฟอง'],
+      });
+      continue;
+    }
+
+    // Whey protein
+    if (name.includes('เวย์โปรตีน') || name.includes('เวย์')) {
+      // 1 scoop typical: 120 kcal, P 24g, C 3g, F 2g
+      const per = { kcal: 120, p: 24, c: 3, f: 2 };
+      const mult = qty;
+      out.push({
+        itemName: 'เวย์โปรตีน',
+        assumedServing: `${qty} ${it.unit ?? 'สกู๊ป'}`,
+        caloriesKcal: Math.round(per.kcal * mult),
+        proteinG: Math.round(per.p * mult),
+        carbsG: Math.round(per.c * mult),
+        fatG: Math.round(per.f * mult),
+        confidence: 'high',
+        notes: ['คำนวณแบบประมาณจากเวย์ 1 สกู๊ปมาตรฐาน (ขึ้นกับยี่ห้อ)'],
+      });
+      continue;
+    }
+
+    // Simple cooked rice
+    if (name.includes('ข้าวสวย') || name === 'ข้าว') {
+      // 1 cup cooked ~ 240 kcal, P 4g, C 53g, F 0.5g
+      const per = { kcal: 240, p: 4, c: 53, f: 0.5 };
+      const mult = qty;
+      out.push({
+        itemName: 'ข้าวสวย',
+        assumedServing: `${qty} ${it.unit ?? 'ถ้วย'}`,
+        caloriesKcal: Math.round(per.kcal * mult),
+        proteinG: Math.round(per.p * mult),
+        carbsG: Math.round(per.c * mult),
+        fatG: Math.round(per.f * mult),
+        confidence: 'medium',
+        notes: ['คำนวณแบบประมาณจากข้าวสวยสุก 1 ถ้วยมาตรฐาน'],
+      });
+      continue;
+    }
+
+    // Thai basil stir-fry on rice (krapow)
+    if (name.includes('ข้าวกะเพรา')) {
+      // Use grams if user provided; otherwise use standard plate.
+      const grams = maybeParseGrams(raw) ?? maybeParseGrams(userText);
+      // Rough standard 1 plate: 650 kcal, P 28g, C 75g, F 25g
+      const base = { kcal: 650, p: 28, c: 75, f: 25 };
+      // If grams provided, scale relative to 350g plate baseline.
+      const scale = grams ? grams / 350 : qty;
+      out.push({
+        itemName: name,
+        assumedServing: grams ? `${Math.round(grams)} กรัม (ประมาณ)` : `${qty} จาน (มาตรฐาน)` ,
+        caloriesKcal: Math.round(base.kcal * scale),
+        proteinG: Math.round(base.p * scale),
+        carbsG: Math.round(base.c * scale),
+        fatG: Math.round(base.f * scale),
+        confidence: grams ? 'high' : 'medium',
+        notes: [
+          grams
+            ? 'คำนวณแบบสเกลจากกะเพราราดข้าวจานมาตรฐาน ~350 กรัม'
+            : 'ประมาณจากกะเพราราดข้าวจานมาตรฐาน (สูตร/น้ำมันทำให้คลาดเคลื่อนได้)',
+        ],
+      });
+      continue;
+    }
+  }
+
+  // Clamp negatives
+  return out.map((r) => ({
+    ...r,
+    caloriesKcal: clampNonNegative(r.caloriesKcal),
+    proteinG: clampNonNegative(r.proteinG),
+    carbsG: clampNonNegative(r.carbsG),
+    fatG: clampNonNegative(r.fatG),
+  }));
+}
+
 function clampNumber(n: unknown): number | null {
   if (typeof n !== 'number' || !Number.isFinite(n)) return null;
   return n;
@@ -181,7 +312,7 @@ export async function POST(req: Request) {
     const text = String(form.get('text') ?? '').trim();
     const image = form.get('image');
 
-  const pre = text ? preprocessThaiMeal(text) : null;
+    const pre = text ? preprocessThaiMeal(text) : null;
 
     if (!text && !(image instanceof File)) {
       return NextResponse.json<ApiResponse>(
@@ -296,7 +427,7 @@ export async function POST(req: Request) {
       const repairInstruction =
         'Convert the following content into a SINGLE valid JSON object ONLY (no markdown, no fences, no extra text).\n' +
         'It MUST match this schema:\n' +
-        '{"results":[{"itemName":"string","assumedServing":"string","caloriesKcal":null,"proteinG":null,"carbsG":null,"fatG":null,"fiberG":null,"sugarG":null,"sodiumMg":null,"confidence":"medium","notes":["string"]}],"followUpQuestions":["string"],"reasoningSummary":"string"}';
+        '{"results":[{"itemName":"string","assumedServing":"string","caloriesKcal":0,"proteinG":0,"carbsG":0,"fatG":0,"fiberG":0,"sugarG":0,"sodiumMg":0,"confidence":"medium","notes":["string"]}],"followUpQuestions":["string"],"reasoningSummary":"string"}';
 
       let repairResp: Awaited<ReturnType<typeof ai.models.generateContent>> | null = null;
       for (const model of modelCandidates) {
@@ -385,13 +516,44 @@ export async function POST(req: Request) {
         })
       : [];
 
+    // Reliability guard:
+    // If the model returns missing/null macros (which we coerce to 0), we may end up with a useless all-zero card.
+    // In that case, try deterministic fallbacks based on parsed Thai items / quantities.
+    const hasAllZeroMacros =
+      results.length > 0 &&
+      results.every(
+        (r) =>
+          (r.caloriesKcal ?? 0) === 0 &&
+          (r.proteinG ?? 0) === 0 &&
+          (r.carbsG ?? 0) === 0 &&
+          (r.fatG ?? 0) === 0,
+      );
+
+    const fallback = hasAllZeroMacros ? estimateFromParsedItems(pre, text) : [];
+    const finalResults: NutritionResult[] =
+      fallback.length > 0
+        ? fallback.map((f) => ({
+            itemName: f.itemName,
+            assumedServing: f.assumedServing,
+            caloriesKcal: f.caloriesKcal,
+            proteinG: f.proteinG,
+            carbsG: f.carbsG,
+            fatG: f.fatG,
+            fiberG: f.fiberG,
+            sugarG: f.sugarG,
+            sodiumMg: f.sodiumMg,
+            confidence: f.confidence,
+            notes: f.notes,
+          }))
+        : results;
+
     const followUpQuestions: string[] = Array.isArray(parsed?.followUpQuestions)
       ? (parsed.followUpQuestions as unknown[]).map((x) => String(x))
       : [];
 
     return NextResponse.json<ApiResponse>({
       ok: true,
-      results,
+      results: finalResults,
       followUpQuestions,
       reasoningSummary: typeof parsed?.reasoningSummary === 'string' ? parsed.reasoningSummary : undefined,
     });

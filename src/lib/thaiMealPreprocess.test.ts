@@ -32,6 +32,16 @@ describe('preprocessThaiMeal (Thai free-text parser)', () => {
     expect(r.items[1]?.qty).toBe(1);
     expect(r.items[1]?.unit).toBe('กระป๋อง');
   });
+
+  it('keeps verbose text but still extracts grams + eggs', () => {
+    const r = preprocessThaiMeal(
+      'ข้าวกระเพราไก่ ปริมาณประมาณ 500 กรัม ไก่ประมาณ 100 กรัม มีไข่ดาว 2 ฟอง ผัดด้วยน้ำมันมะกอกและเครื่องปรุงรสลดโซเดียม',
+    );
+
+    expect(r.items.some((x) => x.name.includes('ข้าวกะเพรา'))).toBe(true);
+    const egg = r.items.find((x) => x.name.includes('ไข่') && x.unit === 'ฟอง');
+    expect(egg?.qty).toBe(2);
+  });
 });
 // NOTE:
 // This repo doesn't use Vitest/Jest. This file is intentionally kept as a no-op
