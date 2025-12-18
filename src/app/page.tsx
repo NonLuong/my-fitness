@@ -297,6 +297,19 @@ function FitnessApp() {
   const [aiMealType, setAiMealType] = useState<MealType>('lunch');
   const lastAiMealProteinCreditRef = useRef<string | null>(null);
 
+  // --- Toasts (lightweight local UI feedback) ---
+  type Toast = { id: string; title: string; description?: string };
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const pushToast = (t: Omit<Toast, 'id'>, opts?: { durationMs?: number }) => {
+    const id = makeId();
+    const durationMs = opts?.durationMs ?? 2200;
+    setToasts((prev) => [...prev, { id, ...t }].slice(-3));
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((x) => x.id !== id));
+    }, durationMs);
+  };
+
   // Batch localStorage writes
   const pendingSaveRef = useRef<DailyLog | null>(null);
   const saveTimerRef = useRef<number | null>(null);
@@ -437,6 +450,16 @@ function FitnessApp() {
       scheduleSave(protein, proteinEvents, workoutState, nextMeals);
       return nextMeals;
     });
+
+    // UX: Close panel first (feels instant), then clear inputs.
+    setAiOpen(false);
+    window.setTimeout(() => {
+      setAiText('');
+      setAiImage(null);
+      setAiError(null);
+      setAiResponse(null);
+      pushToast({ title: 'บันทึกแล้ว', description: 'เพิ่มลงใน Meals ของวันนี้แล้ว' });
+    }, 0);
   };
 
   const deleteMeal = (id: string) => {
@@ -770,6 +793,34 @@ function FitnessApp() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Toasts */}
+  <div className="pointer-events-none fixed bottom-6 left-1/2 z-80 flex w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 flex-col gap-2">
+        <AnimatePresence>
+          {toasts.map((t) => (
+            <motion.div
+              key={t.id}
+              initial={{ opacity: 0, y: 8, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.98 }}
+              transition={{ duration: 0.18 }}
+              className="pointer-events-auto rounded-3xl border border-black/10 bg-white/90 px-4 py-3 shadow-xl shadow-black/5 backdrop-blur dark:border-white/10 dark:bg-neutral-950/80"
+            >
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 inline-flex h-8 w-8 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-300">
+                  <CheckCircle2 className="h-4 w-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-extrabold text-neutral-900 dark:text-white">{t.title}</div>
+                  {t.description && (
+                    <div className="mt-0.5 text-[11px] text-neutral-600 dark:text-neutral-300">{t.description}</div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
 
       <ConfirmDialog
         open={confirmResetOpen}
