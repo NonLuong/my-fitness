@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
+import { preprocessThaiMeal } from '@/lib/thaiMealPreprocess';
 
 export const runtime = 'nodejs';
 
@@ -180,6 +181,8 @@ export async function POST(req: Request) {
     const text = String(form.get('text') ?? '').trim();
     const image = form.get('image');
 
+  const pre = text ? preprocessThaiMeal(text) : null;
+
     if (!text && !(image instanceof File)) {
       return NextResponse.json<ApiResponse>(
         { ok: false, error: 'Please provide text and/or an image.' },
@@ -193,6 +196,11 @@ export async function POST(req: Request) {
       'You are a nutrition assistant. Estimate nutrition for the described meal (and image if provided).\n' +
       'You MUST respond with a single JSON object only. No markdown. No code fences. No extra text.\n' +
       'Language: Thai. All human-readable strings MUST be Thai (itemName, assumedServing, notes, followUpQuestions, reasoningSummary).\n' +
+      (pre
+        ? `Helper input (from Thai text pre-parser):\n- normalizedText: ${pre.normalizedText}\n- parsedItems: ${JSON.stringify(
+            pre.items,
+          )}\n- parserWarnings: ${JSON.stringify(pre.warnings)}\nUse parsedItems only as a hint to split foods and quantities; still interpret context correctly.\n`
+        : '') +
       'Schema (example with placeholder values, do not include comments):\n' +
       '{\n' +
       '  "results": [\n' +

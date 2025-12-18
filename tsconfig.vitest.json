@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "moduleResolution": "nodeNext",
+    "types": ["vitest/globals"],
+    "noEmit": true
+  },
+  "include": [
+    "vitest.config.ts",
+    "src/**/*.test.ts",
+    "src/**/*.ts"
+  ]
+}

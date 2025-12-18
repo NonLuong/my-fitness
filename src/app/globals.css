@@ -1,12 +1,18 @@
 /* stylelint-disable at-rule-no-unknown */
+/* csslint-disable at-rule-no-unknown */
 @import "tailwindcss";
 
 /* Tailwind CSS v4: enable `dark:` utilities using the `.dark` class on a parent (e.g. <html class="dark">) */
+/* css-lsp-disable at-rule-no-unknown */
 @custom-variant dark (&:where(.dark, .dark *));
+/* css-lsp-enable at-rule-no-unknown */
 
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* Accent (used for focus rings / selection) */
+  --accent: 16 185 129; /* emerald-500 */
 }
 
 /* Class-based dark mode (used by the app's theme toggle) */
@@ -34,6 +40,31 @@ body {
   color: var(--foreground);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial,
     "Noto Sans", "Liberation Sans", sans-serif;
+}
+
+::selection {
+  background: rgba(var(--accent) / 0.18);
+}
+
+/* Cleaner focus ring defaults */
+:focus-visible {
+  outline: 2px solid rgba(var(--accent) / 0.55);
+  outline-offset: 3px;
+  border-radius: 12px;
+}
+
+/* Subtle grain to make glass UI feel more premium (very light) */
+@media (prefers-reduced-motion: no-preference) {
+  body {
+    background-image:
+      radial-gradient(circle at 1px 1px, rgba(0, 0, 0, 0.03) 1px, transparent 0);
+    background-size: 36px 36px;
+    background-attachment: fixed;
+  }
+  .dark body {
+    background-image:
+      radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.04) 1px, transparent 0);
+  }
 }
 
 /* stylelint-enable at-rule-no-unknown */

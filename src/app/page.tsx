@@ -24,6 +24,12 @@ import {
 
 import { resolveExerciseDetailFromLabel } from '@/lib/exercises';
 
+import { ConfirmDialog } from './_components/ConfirmDialog';
+import { MobileTabs, type MobileTab } from './_components/MobileTabs';
+import { fadeUp, springy, staggerContainer } from './_components/utils/motion';
+import { NutritionSection } from './_components/sections/NutritionSection';
+import type { MealEntry, MealType } from './_components/types/nutrition';
+
 // --- 1. Type Definition ---
 interface DailySchedule {
   title: string;
@@ -54,6 +60,8 @@ type ScheduleType = {
 
 type ThemeMode = 'light' | 'dark' | 'system';
 
+const MOBILE_TAB_STORAGE_KEY = 'ui_mobileTab_v1';
+
 type AiNutritionResult = {
   itemName: string;
   assumedServing: string;
@@ -76,31 +84,56 @@ type AiNutritionResponse = {
   error?: string;
 };
 
-type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
+function usePrefersReducedMotion() {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const onChange = () => setReduced(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return reduced;
+}
 
-type MealItem = {
-  itemName: string;
-  assumedServing: string;
-  caloriesKcal: number | null;
-  proteinG: number | null;
-  carbsG: number | null;
-  fatG: number | null;
-  fiberG?: number | null;
-  sugarG?: number | null;
-  sodiumMg?: number | null;
-  confidence: 'low' | 'medium' | 'high';
-  notes: string[];
-};
+function useAnimatedNumber(value: number, opts?: { durationMs?: number }) {
+  const durationMs = opts?.durationMs ?? 450;
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const [display, setDisplay] = useState<number>(value);
+  const rafRef = useRef<number | null>(null);
+  const fromRef = useRef<number>(value);
+  const startRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (prefersReducedMotion) {
+      setDisplay(value);
+      return;
+    }
+    if (!Number.isFinite(value)) return;
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    fromRef.current = display;
+    startRef.current = performance.now();
+
+    const tick = (t: number) => {
+      const p = Math.min(1, (t - startRef.current) / durationMs);
+      // easeOutCubic
+      const e = 1 - Math.pow(1 - p, 3);
+      const next = fromRef.current + (value - fromRef.current) * e;
+      setDisplay(next);
+      if (p < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, durationMs, prefersReducedMotion]);
+
+  return display;
+}
 
 // AI Nutrition panel was removed for now (to keep page.tsx stable).
-
-type MealEntry = {
-  id: string;
-  ts: number;
-  mealType: MealType;
-  sourceText?: string;
-  items: MealItem[];
-};
 
 type DailyLog = {
   protein: number;
@@ -233,6 +266,18 @@ function FitnessApp() {
 
   const [tipOpen, setTipOpen] = useState<boolean>(false);
   const [showLog, setShowLog] = useState<boolean>(false);
+
+  const [mobileTab, setMobileTab] = useState<MobileTab>(() => {
+    if (typeof window === 'undefined') return 'workout';
+    const raw = window.localStorage.getItem(MOBILE_TAB_STORAGE_KEY);
+    if (raw === 'workout' || raw === 'nutrition' || raw === 'protein') return raw;
+    return 'workout';
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(MOBILE_TAB_STORAGE_KEY, mobileTab);
+  }, [mobileTab]);
 
   // Workout details modal
   const [selectedExerciseLabel, setSelectedExerciseLabel] = useState<string | null>(null);
@@ -442,8 +487,37 @@ function FitnessApp() {
     scheduleSave(0, [], nextWorkout, []);
   };
 
+  // --- UX helpers ---
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const proteinAnimated = useAnimatedNumber(protein);
+  const kcalAnimated = useAnimatedNumber(mealTotals.caloriesKcal);
+  const pAnimated = useAnimatedNumber(mealTotals.proteinG);
+  const cAnimated = useAnimatedNumber(mealTotals.carbsG);
+  const fAnimated = useAnimatedNumber(mealTotals.fatG);
+
+  const [confirmResetOpen, setConfirmResetOpen] = useState(false);
+  const [mealToDelete, setMealToDelete] = useState<string | null>(null);
+
+  // UX: when switching tabs on mobile, scroll back to the top of main content.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!isMobile) return;
+    // Avoid fighting the user if they're in the middle of a modal.
+    if (aiOpen || selectedExerciseLabel) return;
+    const behavior: ScrollBehavior = prefersReducedMotion ? 'auto' : 'smooth';
+    window.scrollTo({ top: 0, behavior });
+  }, [mobileTab, isMobile, prefersReducedMotion, aiOpen, selectedExerciseLabel]);
+
   return (
-    <div>
+    <div className="min-h-screen">
+      {/* Background wash */}
+      <div className="pointer-events-none fixed inset-0 -z-10">
+        <div className="absolute inset-0 bg-linear-to-b from-emerald-50 via-white to-white dark:from-neutral-950 dark:via-neutral-950 dark:to-neutral-950" />
+        <div className="absolute -left-32 -top-32 h-130 w-130 rounded-full bg-emerald-500/12 blur-3xl dark:bg-emerald-400/10" />
+        <div className="absolute -right-40 top-24 h-140 w-140 rounded-full bg-cyan-500/10 blur-3xl dark:bg-cyan-400/8" />
+        <div className="absolute inset-x-0 top-0 h-72 bg-[radial-gradient(ellipse_at_top,rgba(16,185,129,0.12),transparent_55%)] dark:bg-[radial-gradient(ellipse_at_top,rgba(16,185,129,0.10),transparent_60%)]" />
+      </div>
+
       {/* AI Nutrition — compact card */}
       <div className="fixed bottom-5 right-5 z-40">
         <button
@@ -697,6 +771,35 @@ function FitnessApp() {
         )}
       </AnimatePresence>
 
+      <ConfirmDialog
+        open={confirmResetOpen}
+        title="Reset today?"
+        description="This clears protein, workout progress, and saved meals for today."
+        confirmLabel="Reset day"
+        variant="danger"
+        prefersReducedMotion={prefersReducedMotion}
+        onClose={() => setConfirmResetOpen(false)}
+        onConfirm={() => {
+          setConfirmResetOpen(false);
+          resetAllToday();
+        }}
+      />
+
+      <ConfirmDialog
+        open={!!mealToDelete}
+        title="Delete this meal?"
+        description="This can’t be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        prefersReducedMotion={prefersReducedMotion}
+        onClose={() => setMealToDelete(null)}
+        onConfirm={() => {
+          const id = mealToDelete;
+          setMealToDelete(null);
+          if (id) deleteMeal(id);
+        }}
+      />
+
       {/* Navbar */}
       <nav
         className={`sticky top-0 z-50 px-6 py-4 backdrop-blur-xl border-b transition-colors duration-300 bg-white/70 border-gray-200 dark:bg-neutral-950/70 dark:border-white/5`}
@@ -737,137 +840,52 @@ function FitnessApp() {
               dark:bg-white/5 dark:text-neutral-500 dark:border-white/5">
               {today.toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' })}
             </div>
+
+            <button
+              type="button"
+              onClick={() => setConfirmResetOpen(true)}
+              className="hidden sm:inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700 transition hover:bg-rose-100 dark:border-rose-500/20 dark:bg-rose-950/25 dark:text-rose-200 dark:hover:bg-rose-950/35"
+              aria-label="Reset day"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Reset
+            </button>
           </div>
         </div>
       </nav>
 
-      <main className="max-w-6xl mx-auto p-4 md:p-6 space-y-6">
+  <main className="max-w-6xl mx-auto p-4 md:p-6 space-y-6">
 
-        {/* Meals & Nutrition (AI history) */}
-        <section className="space-y-3">
-          <div className="flex items-end justify-between gap-3 px-1">
-            <div>
-              <div className="text-[11px] font-semibold tracking-wide text-gray-500 dark:text-neutral-400">Nutrition</div>
-              <div className="text-lg font-extrabold tracking-tight text-gray-900 dark:text-white">Today&apos;s meals</div>
-            </div>
-            <button
-              onClick={() => setAiOpen(true)}
-              className="rounded-2xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-500"
-            >
-              Add meal
-            </button>
-          </div>
+        <MobileTabs
+          value={mobileTab}
+          onChange={setMobileTab}
+          mealsCount={meals.length}
+          progressPercent={progress}
+          prefersReducedMotion={prefersReducedMotion}
+        />
 
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6">
-            <div className="md:col-span-5 rounded-3xl border border-black/5 bg-white/70 p-5 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-neutral-900/40">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-sm font-extrabold tracking-tight text-gray-900 dark:text-white">Today&apos;s Nutrition</div>
-                  <div className="text-xs text-gray-500 dark:text-neutral-400">From saved meals (AI)</div>
-                </div>
-                <div className="inline-flex items-center rounded-full border border-black/5 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-gray-600 dark:border-white/10 dark:bg-white/5 dark:text-neutral-300">
-                  {meals.length} meals
-                </div>
-              </div>
-
-            <div className="mt-4 grid grid-cols-4 gap-2 text-center">
-              <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                <div className="text-[10px] text-gray-500 dark:text-neutral-400">kcal</div>
-                <div className="text-sm font-extrabold text-gray-900 dark:text-white">{mealTotals.caloriesKcal}</div>
-              </div>
-              <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                <div className="text-[10px] text-gray-500 dark:text-neutral-400">P</div>
-                <div className="text-sm font-extrabold text-gray-900 dark:text-white">{mealTotals.proteinG}</div>
-              </div>
-              <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                <div className="text-[10px] text-gray-500 dark:text-neutral-400">C</div>
-                <div className="text-sm font-extrabold text-gray-900 dark:text-white">{mealTotals.carbsG}</div>
-              </div>
-              <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                <div className="text-[10px] text-gray-500 dark:text-neutral-400">F</div>
-                <div className="text-sm font-extrabold text-gray-900 dark:text-white">{mealTotals.fatG}</div>
-              </div>
-            </div>
-
-              <div className="mt-4 text-xs text-gray-500 dark:text-neutral-400">
-                Tip: Save meals from AI Nutrition (bottom-right) to build accurate day totals.
-              </div>
-            </div>
-
-            <div className="md:col-span-7 rounded-3xl border border-black/5 bg-white/70 p-5 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-neutral-900/40">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-extrabold tracking-tight text-gray-900 dark:text-white">Meal history</div>
-                  <div className="text-xs text-gray-500 dark:text-neutral-400">Saved from AI Nutrition</div>
-                </div>
-                <div className="inline-flex items-center rounded-full border border-black/5 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-gray-600 dark:border-white/10 dark:bg-white/5 dark:text-neutral-300">
-                  Last {Math.min(meals.length, 8)} items
-                </div>
-              </div>
-
-              {meals.length === 0 ? (
-                <div className="mt-3 rounded-2xl border border-dashed border-gray-300 bg-white/50 p-4 text-xs text-gray-500 dark:border-white/10 dark:bg-white/5 dark:text-neutral-400">
-                  No meals saved yet.
-                </div>
-              ) : (
-                <div className="mt-3 space-y-3">
-                  {meals.slice(0, 8).map((m) => {
-                    const kcal = m.items.reduce((s, it) => s + (it.caloriesKcal ?? 0), 0);
-                    const p = m.items.reduce((s, it) => s + (it.proteinG ?? 0), 0);
-                    const c = m.items.reduce((s, it) => s + (it.carbsG ?? 0), 0);
-                    const f = m.items.reduce((s, it) => s + (it.fatG ?? 0), 0);
-
-                    return (
-                      <div key={m.id} className="group rounded-3xl border border-black/5 bg-white/65 p-4 shadow-sm transition hover:bg-white/80 dark:border-white/10 dark:bg-neutral-950/25 dark:hover:bg-neutral-950/35">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-xs font-extrabold tracking-tight text-gray-900 dark:text-white">
-                              {m.mealType.toUpperCase()} • {new Date(m.ts).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}
-                            </div>
-                            <div className="mt-1 text-[11px] text-gray-500 dark:text-neutral-400 line-clamp-2">
-                              {m.items.map(it => it.itemName).join(' + ')}
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => deleteMeal(m.id)}
-                            className="rounded-2xl px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-950/30"
-                          >
-                            Delete
-                          </button>
-                        </div>
-
-                        <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-                          <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                            <div className="text-[10px] text-gray-500 dark:text-neutral-400">kcal</div>
-                            <div className="text-sm font-extrabold">{Math.round(kcal)}</div>
-                          </div>
-                          <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                            <div className="text-[10px] text-gray-500 dark:text-neutral-400">P</div>
-                            <div className="text-sm font-extrabold">{Math.round(p)}</div>
-                          </div>
-                          <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                            <div className="text-[10px] text-gray-500 dark:text-neutral-400">C</div>
-                            <div className="text-sm font-extrabold">{Math.round(c)}</div>
-                          </div>
-                          <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                            <div className="text-[10px] text-gray-500 dark:text-neutral-400">F</div>
-                            <div className="text-sm font-extrabold">{Math.round(f)}</div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        </section>
+        <NutritionSection
+          mobileVisible={mobileTab === 'nutrition'}
+          prefersReducedMotion={prefersReducedMotion}
+          meals={meals}
+          kcalAnimated={kcalAnimated}
+          pAnimated={pAnimated}
+          cAnimated={cAnimated}
+          fAnimated={fAnimated}
+          onOpenAi={() => setAiOpen(true)}
+          onRequestDeleteMeal={(id) => setMealToDelete(id)}
+        />
 
         {/* Hero Section */}
-        <header className="py-6 md:py-10">
+        <motion.header
+          variants={staggerContainer}
+          initial={prefersReducedMotion ? false : 'hidden'}
+          animate={prefersReducedMotion ? false : 'show'}
+          className={`py-6 md:py-10 ${mobileTab === 'workout' ? '' : 'hidden md:block'}`}
+        >
           <motion.div
-            initial={{ opacity: 0, y: isMobile ? 8 : 20 }}
-            animate={{ opacity: 1, y: 0 }}
+            variants={fadeUp}
+            transition={springy(prefersReducedMotion)}
             className="flex flex-col md:flex-row md:items-end justify-between gap-4"
           >
             <div>
@@ -911,18 +929,18 @@ function FitnessApp() {
               <div>
                 <div className="text-sm text-gray-500 dark:text-neutral-400">Daily Protein</div>
                 <div className="text-xl font-bold text-gray-900 dark:text-white">
-                  {protein} <span className="text-gray-400 dark:text-neutral-500 text-sm">/ 180g</span>
+                  {Math.round(proteinAnimated)} <span className="text-gray-400 dark:text-neutral-500 text-sm">/ 180g</span>
                 </div>
               </div>
             </div>
           </motion.div>
-        </header>
+        </motion.header>
 
-        {/* Bento Grid Layout */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6">
+  {/* Bento Grid Layout */}
+  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6">
 
           {/* Left Column: Workout List (Span 8) */}
-          <div className="md:col-span-8 space-y-4">
+          <div className={`md:col-span-8 space-y-4 ${mobileTab === 'workout' ? '' : 'hidden md:block'}`}>
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-xl font-semibold flex items-center gap-2 text-gray-900 dark:text-white">
                 <TrendingUp className="w-5 h-5 text-emerald-600 dark:text-emerald-500" /> Workout Plan
@@ -1237,8 +1255,8 @@ function FitnessApp() {
             )}
           </AnimatePresence>
 
-          {/* Right Column: Nutrition & Extras (Span 4) */}
-          <div className="md:col-span-4 space-y-6">
+          {/* Right Column: Protein & Extras (Span 4) */}
+          <div className={`md:col-span-4 space-y-6 ${mobileTab === 'protein' ? '' : 'hidden md:block'}`}>
 
             {/* Mobile Progress Card */}
             <div className="md:hidden p-6 rounded-3xl border shadow-sm
@@ -1356,7 +1374,7 @@ function FitnessApp() {
                 </button>
                 <button
                   type="button"
-                  onClick={resetAllToday}
+                  onClick={() => setConfirmResetOpen(true)}
                   className="w-full py-3 rounded-xl border text-xs transition-all inline-flex items-center justify-center gap-2
                     border-red-200 bg-red-50 text-red-600 hover:bg-red-100
                     dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200 dark:hover:bg-red-950/35"
