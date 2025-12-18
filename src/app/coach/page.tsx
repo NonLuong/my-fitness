@@ -1,24 +1,26 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
 import {
-  ArrowLeft,
   CheckCircle2,
-  ClipboardList,
   Flame,
-  HeartPulse,
-  Info,
-  MessageCircle,
   Loader2,
   RefreshCw,
   Send,
   Sparkles,
+  ChevronRight,
+  ChevronLeft,
+  User,
+  Dumbbell,
+  Activity,
+  Weight,
+  Plus,
 } from 'lucide-react';
+import { Header } from '@/app/_components/Header';
 
 type Sex = 'male' | 'female';
 type Experience = 'beginner' | 'intermediate' | 'advanced';
@@ -261,6 +263,7 @@ export default function CoachPage() {
   const STORAGE_KEY = 'coach_chat_v1';
   const PROFILE_KEY = 'coach_profile_v1';
 
+  const [step, setStep] = useState(1);
   const [profile, setProfile] = useState<CoachProfile>({
     sex: 'male',
     activity: 'moderate',
@@ -325,22 +328,46 @@ export default function CoachPage() {
 
   useEffect(() => {
     // Load profile + chat
+    const now = Date.now();
+    const EXPIRATION_MS = 24 * 60 * 60 * 1000; // 24 hours
+
     try {
       const rawProfile = localStorage.getItem(PROFILE_KEY);
       if (rawProfile) {
-        const p = JSON.parse(rawProfile) as Partial<CoachProfile>;
-        setProfile((prev) => ({ ...prev, ...p }));
+        const data = JSON.parse(rawProfile);
+        // Check if valid and not expired
+        if (data.timestamp && (now - data.timestamp < EXPIRATION_MS)) {
+          if (data.profile) setProfile(data.profile);
+          if (data.draftProfile) setDraftProfile(data.draftProfile);
+          
+          if (data.profile?.ageYears && data.profile?.heightCm && data.profile?.weightKg && data.profile?.goal) {
+            setStep(5);
+          }
+        } else {
+          // Expired or invalid format -> Clear
+          localStorage.removeItem(PROFILE_KEY);
+        }
       }
     } catch {
       // ignore
     }
 
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as { messages: CoachChatMessage[] };
-        if (Array.isArray(parsed.messages)) setMessages(parsed.messages);
-      } else {
+      const rawChat = localStorage.getItem(STORAGE_KEY);
+      let chatLoaded = false;
+      if (rawChat) {
+        const data = JSON.parse(rawChat);
+        if (data.timestamp && (now - data.timestamp < EXPIRATION_MS)) {
+          if (Array.isArray(data.messages)) {
+            setMessages(data.messages);
+            chatLoaded = true;
+          }
+        } else {
+          localStorage.removeItem(STORAGE_KEY);
+        }
+      }
+      
+      if (!chatLoaded) {
         // seed with a friendly intro
         setMessages([
           {
@@ -358,7 +385,7 @@ export default function CoachPage() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ messages }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ messages, timestamp: Date.now() }));
     } catch {
       // ignore
     }
@@ -366,11 +393,11 @@ export default function CoachPage() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+      localStorage.setItem(PROFILE_KEY, JSON.stringify({ profile, draftProfile, timestamp: Date.now() }));
     } catch {
       // ignore
     }
-  }, [profile]);
+  }, [profile, draftProfile]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -446,7 +473,7 @@ export default function CoachPage() {
 
   const sendToCoach = async (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed || submitting) return;
 
     setSubmitting(true);
     setApiError(null);
@@ -509,564 +536,572 @@ export default function CoachPage() {
     await sendToCoach(t);
   };
 
+  const nextStep = () => setStep((s) => Math.min(s + 1, 5));
+  const prevStep = () => setStep((s) => Math.max(s - 1, 1));
+
   return (
     <div className="min-h-screen">
-      <nav className="sticky top-0 z-50 border-b border-gray-200 bg-white/70 px-4 py-3 backdrop-blur-xl dark:border-white/5 dark:bg-neutral-950/70">
-        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Link
-              href="/"
-              className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white/70 px-3 py-2 text-xs font-bold text-neutral-800 transition hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-neutral-100 dark:hover:bg-white/10"
+      {/* Background wash */}
+      <div className="pointer-events-none fixed inset-0 -z-10">
+        <div className="absolute inset-0 bg-linear-to-b from-emerald-50 via-white to-white dark:from-neutral-950 dark:via-neutral-950 dark:to-neutral-950" />
+        <div className="absolute -left-32 -top-32 h-130 w-130 rounded-full bg-emerald-500/12 blur-3xl dark:bg-emerald-400/10" />
+        <div className="absolute -right-40 top-24 h-140 w-140 rounded-full bg-cyan-500/10 blur-3xl dark:bg-cyan-400/8" />
+        <div className="absolute inset-x-0 top-0 h-72 bg-[radial-gradient(ellipse_at_top,rgba(16,185,129,0.12),transparent_55%)] dark:bg-[radial-gradient(ellipse_at_top,rgba(16,185,129,0.10),transparent_60%)]" />
+      </div>
+
+      <Header showBack maxWidthClass="max-w-3xl" />
+
+      <main className="mx-auto w-full max-w-3xl px-4 py-6">
+        <AnimatePresence mode="wait">
+          {step === 1 && (
+            <motion.div
+              key="step1"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-6"
             >
-              <ArrowLeft className="h-4 w-4" />
-              กลับหน้าแรก
-            </Link>
-          </div>
-
-          <div className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white/70 px-3 py-2 text-xs font-extrabold text-neutral-900 dark:border-white/10 dark:bg-white/5 dark:text-white">
-            <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-            โค้ชส่วนตัว
-          </div>
-        </div>
-      </nav>
-
-      <main className="mx-auto w-full max-w-3xl space-y-4 px-4 py-5">
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.25 }}
-          className="rounded-[28px] border border-black/5 bg-white/70 p-5 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-neutral-900/40"
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[11px] font-semibold tracking-wide text-gray-500 dark:text-neutral-400">
-                แบบฟอร์มสุขภาพ
+              <div className="text-center">
+                <h1 className="text-2xl font-extrabold text-neutral-900 dark:text-white">เริ่มต้นกันเลย</h1>
+                <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">ข้อมูลพื้นฐานเพื่อคำนวณค่าพลังงานของคุณ</p>
               </div>
-              <div className="mt-0.5 text-lg font-extrabold tracking-tight text-neutral-900 dark:text-white">
-                คำนวณ BMI • แคลต่อวัน • โค้ช AI
-              </div>
-              <div className="mt-2 text-xs text-neutral-600 dark:text-neutral-300">
-                กรอกข้อมูลให้ครบเท่าที่สะดวก (รอบตัวใช้หน่วย <b>นิ้ว</b>) แล้วกด “ขอแผนจากโค้ช”
-              </div>
-            </div>
-            <div className="hidden sm:flex items-center gap-2 rounded-3xl border border-black/5 bg-white/60 px-3 py-2 text-[11px] font-semibold text-neutral-700 dark:border-white/10 dark:bg-neutral-950/25 dark:text-neutral-200">
-              <Info className="h-4 w-4" />
-              Mobile‑first
-            </div>
-          </div>
-        </motion.div>
 
-        {/* Form */}
-        <div className="grid grid-cols-1 gap-4">
-          <section className="rounded-[28px] border border-black/5 bg-white/70 p-5 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-neutral-900/40">
-            <div className="flex items-center gap-2">
-              <div className="grid h-9 w-9 place-items-center rounded-2xl bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/20 dark:bg-emerald-400/10 dark:text-emerald-200 dark:ring-emerald-400/20">
-                <ClipboardList className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="text-sm font-extrabold text-neutral-900 dark:text-white">ข้อมูลพื้นฐาน</div>
-                <div className="text-[11px] text-neutral-500 dark:text-neutral-400">ใช้เพื่อคำนวณ BMR/TDEE และคำแนะนำ</div>
-              </div>
-            </div>
+              <div className="rounded-4xl border border-black/5 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-neutral-900">
+                <div className="space-y-6">
+                  <div className="space-y-3">
+                    <label className="text-sm font-bold text-neutral-900 dark:text-white">เพศ</label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setProfile((p) => ({ ...p, sex: 'male' }))}
+                        className={cn(
+                          'flex flex-col items-center justify-center gap-2 rounded-2xl border-2 py-6 transition',
+                          profile.sex === 'male'
+                            ? 'border-emerald-500 bg-emerald-50/50 text-emerald-700 dark:border-emerald-500 dark:bg-emerald-500/10 dark:text-emerald-400'
+                            : 'border-transparent bg-neutral-100 text-neutral-500 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-400 dark:hover:bg-neutral-700'
+                        )}
+                      >
+                        <User className="h-8 w-8" />
+                        <span className="font-bold">ชาย</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setProfile((p) => ({ ...p, sex: 'female' }))}
+                        className={cn(
+                          'flex flex-col items-center justify-center gap-2 rounded-2xl border-2 py-6 transition',
+                          profile.sex === 'female'
+                            ? 'border-emerald-500 bg-emerald-50/50 text-emerald-700 dark:border-emerald-500 dark:bg-emerald-500/10 dark:text-emerald-400'
+                            : 'border-transparent bg-neutral-100 text-neutral-500 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-400 dark:hover:bg-neutral-700'
+                        )}
+                      >
+                        <User className="h-8 w-8" />
+                        <span className="font-bold">หญิง</span>
+                      </button>
+                    </div>
+                  </div>
 
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <label className="space-y-1">
-                <div className="text-[11px] font-bold text-neutral-700 dark:text-neutral-200">เพศ</div>
-                <select
-                  value={profile.sex}
-                  onChange={(e) => setProfile((p) => ({ ...p, sex: e.target.value as Sex }))}
-                  className="w-full rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-semibold text-neutral-900 outline-none dark:border-white/10 dark:bg-neutral-950/40 dark:text-white"
-                >
-                  <option value="male">ชาย</option>
-                  <option value="female">หญิง</option>
-                </select>
-              </label>
-
-              <label className="space-y-1">
-                <div className="text-[11px] font-bold text-neutral-700 dark:text-neutral-200">อายุ (ปี)</div>
-                <input
-                  inputMode="numeric"
-                  placeholder="เช่น 25"
-                  value={draftProfile.ageYears}
-                  onChange={(e) => setDraftProfile((d) => ({ ...d, ageYears: e.target.value }))}
-                  onBlur={() => commitNumber('ageYears', draftProfile.ageYears, { min: 10, max: 90 })}
-                  className="w-full rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-semibold text-neutral-900 outline-none dark:border-white/10 dark:bg-neutral-950/40 dark:text-white"
-                />
-              </label>
-
-              <label className="space-y-1">
-                <div className="text-[11px] font-bold text-neutral-700 dark:text-neutral-200">ส่วนสูง (cm)</div>
-                <input
-                  inputMode="numeric"
-                  placeholder="เช่น 170"
-                  value={draftProfile.heightCm}
-                  onChange={(e) => setDraftProfile((d) => ({ ...d, heightCm: e.target.value }))}
-                  onBlur={() => commitNumber('heightCm', draftProfile.heightCm, { min: 120, max: 230 })}
-                  className="w-full rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-semibold text-neutral-900 outline-none dark:border-white/10 dark:bg-neutral-950/40 dark:text-white"
-                />
-              </label>
-
-              <label className="space-y-1">
-                <div className="text-[11px] font-bold text-neutral-700 dark:text-neutral-200">น้ำหนัก (kg)</div>
-                <input
-                  inputMode="numeric"
-                  placeholder="เช่น 70"
-                  value={draftProfile.weightKg}
-                  onChange={(e) => setDraftProfile((d) => ({ ...d, weightKg: e.target.value }))}
-                  onBlur={() => commitNumber('weightKg', draftProfile.weightKg, { min: 30, max: 250 })}
-                  className="w-full rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-semibold text-neutral-900 outline-none dark:border-white/10 dark:bg-neutral-950/40 dark:text-white"
-                />
-              </label>
-
-              <label className="space-y-1 sm:col-span-2">
-                <div className="text-[11px] font-bold text-neutral-700 dark:text-neutral-200">กิจกรรมประจำวัน</div>
-                <select
-                  value={profile.activity}
-                  onChange={(e) => setProfile((p) => ({ ...p, activity: e.target.value as ActivityLevel }))}
-                  className="w-full rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-semibold text-neutral-900 outline-none dark:border-white/10 dark:bg-neutral-950/40 dark:text-white"
-                >
-                  {Object.keys(ACTIVITY_MULTIPLIERS).map((k) => (
-                    <option key={k} value={k}>
-                      {activityLabelTh(k as ActivityLevel)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          </section>
-
-          <section className="rounded-[28px] border border-black/5 bg-white/70 p-5 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-neutral-900/40">
-            <div className="flex items-center gap-2">
-              <div className="grid h-9 w-9 place-items-center rounded-2xl bg-sky-500/15 text-sky-700 ring-1 ring-sky-500/20 dark:bg-sky-400/10 dark:text-sky-200 dark:ring-sky-400/20">
-                <HeartPulse className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="text-sm font-extrabold text-neutral-900 dark:text-white">รอบตัว (นิ้ว)</div>
-                <div className="text-[11px] text-neutral-500 dark:text-neutral-400">ช่วยประเมินสัดส่วน (กรอกเท่าที่มี)</div>
-              </div>
-            </div>
-
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <label className="space-y-1">
-                <div className="text-[11px] font-bold text-neutral-700 dark:text-neutral-200">รอบเอว (นิ้ว)</div>
-                <input
-                  inputMode="decimal"
-                  placeholder="เช่น 32"
-                  value={draftProfile.waistIn}
-                  onChange={(e) => setDraftProfile((d) => ({ ...d, waistIn: e.target.value }))}
-                  onBlur={() => commitNumber('waistIn', draftProfile.waistIn, { min: 1, max: 90 })}
-                  className="w-full rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-semibold text-neutral-900 outline-none placeholder:text-neutral-400 dark:border-white/10 dark:bg-neutral-950/40 dark:text-white"
-                />
-              </label>
-              <label className="space-y-1">
-                <div className="text-[11px] font-bold text-neutral-700 dark:text-neutral-200">รอบสะโพก (นิ้ว)</div>
-                <input
-                  inputMode="decimal"
-                  placeholder="เช่น 38"
-                  value={draftProfile.hipIn}
-                  onChange={(e) => setDraftProfile((d) => ({ ...d, hipIn: e.target.value }))}
-                  onBlur={() => commitNumber('hipIn', draftProfile.hipIn, { min: 1, max: 120 })}
-                  className="w-full rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-semibold text-neutral-900 outline-none placeholder:text-neutral-400 dark:border-white/10 dark:bg-neutral-950/40 dark:text-white"
-                />
-              </label>
-              <label className="space-y-1">
-                <div className="text-[11px] font-bold text-neutral-700 dark:text-neutral-200">รอบอก (นิ้ว)</div>
-                <input
-                  inputMode="decimal"
-                  placeholder="เช่น 40"
-                  value={draftProfile.chestIn}
-                  onChange={(e) => setDraftProfile((d) => ({ ...d, chestIn: e.target.value }))}
-                  onBlur={() => commitNumber('chestIn', draftProfile.chestIn, { min: 1, max: 120 })}
-                  className="w-full rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-semibold text-neutral-900 outline-none placeholder:text-neutral-400 dark:border-white/10 dark:bg-neutral-950/40 dark:text-white"
-                />
-              </label>
-              <label className="space-y-1">
-                <div className="text-[11px] font-bold text-neutral-700 dark:text-neutral-200">รอบคอ (นิ้ว)</div>
-                <input
-                  inputMode="decimal"
-                  placeholder="(optional)"
-                  value={draftProfile.neckIn}
-                  onChange={(e) => setDraftProfile((d) => ({ ...d, neckIn: e.target.value }))}
-                  onBlur={() => commitNumber('neckIn', draftProfile.neckIn, { min: 1, max: 40 })}
-                  className="w-full rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-semibold text-neutral-900 outline-none placeholder:text-neutral-400 dark:border-white/10 dark:bg-neutral-950/40 dark:text-white"
-                />
-              </label>
-              <label className="space-y-1">
-                <div className="text-[11px] font-bold text-neutral-700 dark:text-neutral-200">รอบต้นแขน (นิ้ว)</div>
-                <input
-                  inputMode="decimal"
-                  placeholder="(optional)"
-                  value={draftProfile.armIn}
-                  onChange={(e) => setDraftProfile((d) => ({ ...d, armIn: e.target.value }))}
-                  onBlur={() => commitNumber('armIn', draftProfile.armIn, { min: 1, max: 40 })}
-                  className="w-full rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-semibold text-neutral-900 outline-none placeholder:text-neutral-400 dark:border-white/10 dark:bg-neutral-950/40 dark:text-white"
-                />
-              </label>
-              <label className="space-y-1">
-                <div className="text-[11px] font-bold text-neutral-700 dark:text-neutral-200">รอบต้นขา (นิ้ว)</div>
-                <input
-                  inputMode="decimal"
-                  placeholder="(optional)"
-                  value={draftProfile.thighIn}
-                  onChange={(e) => setDraftProfile((d) => ({ ...d, thighIn: e.target.value }))}
-                  onBlur={() => commitNumber('thighIn', draftProfile.thighIn, { min: 1, max: 60 })}
-                  className="w-full rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-semibold text-neutral-900 outline-none placeholder:text-neutral-400 dark:border-white/10 dark:bg-neutral-950/40 dark:text-white"
-                />
-              </label>
-            </div>
-          </section>
-
-          <section className="rounded-[28px] border border-black/5 bg-white/70 p-5 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-neutral-900/40">
-            <div className="flex items-center gap-2">
-              <div className="grid h-9 w-9 place-items-center rounded-2xl bg-amber-500/15 text-amber-800 ring-1 ring-amber-500/20 dark:bg-amber-400/10 dark:text-amber-200 dark:ring-amber-400/20">
-                <Flame className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="text-sm font-extrabold text-neutral-900 dark:text-white">เป้าหมาย</div>
-                <div className="text-[11px] text-neutral-500 dark:text-neutral-400">โค้ชจะปรับแคล/โปรตีนให้ตามเป้าหมาย</div>
-              </div>
-            </div>
-
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <label className="space-y-1 sm:col-span-2">
-                <div className="text-[11px] font-bold text-neutral-700 dark:text-neutral-200">โฟกัสหลัก</div>
-                <select
-                  value={profile.goal}
-                  onChange={(e) => setProfile((p) => ({ ...p, goal: e.target.value as Goal }))}
-                  className="w-full rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-semibold text-neutral-900 outline-none dark:border-white/10 dark:bg-neutral-950/40 dark:text-white"
-                >
-                  <option value="lose_weight">ลดน้ำหนัก</option>
-                  <option value="lose_fat">ลดไขมัน</option>
-                  <option value="maintain">คุมหุ่น</option>
-                  <option value="gain_muscle">เพิ่มกล้ามเนื้อ</option>
-                  <option value="gain_weight">เพิ่มน้ำหนัก</option>
-                </select>
-              </label>
-
-              <label className="space-y-1">
-                <div className="text-[11px] font-bold text-neutral-700 dark:text-neutral-200">น้ำหนักเป้าหมาย (kg)</div>
-                <input
-                  inputMode="decimal"
-                  placeholder="(optional)"
-                  value={draftProfile.targetWeightKg}
-                  onChange={(e) => setDraftProfile((d) => ({ ...d, targetWeightKg: e.target.value }))}
-                  onBlur={() => commitNumber('targetWeightKg', draftProfile.targetWeightKg, { min: 30, max: 300 })}
-                  className="w-full rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-semibold text-neutral-900 outline-none placeholder:text-neutral-400 dark:border-white/10 dark:bg-neutral-950/40 dark:text-white"
-                />
-              </label>
-
-              <label className="space-y-1">
-                <div className="text-[11px] font-bold text-neutral-700 dark:text-neutral-200">ระยะเวลาเป้า (สัปดาห์)</div>
-                <input
-                  inputMode="numeric"
-                  placeholder="เช่น 8"
-                  value={draftProfile.targetWeeks}
-                  onChange={(e) => setDraftProfile((d) => ({ ...d, targetWeeks: e.target.value }))}
-                  onBlur={() => commitNumber('targetWeeks', draftProfile.targetWeeks, { min: 1, max: 52 })}
-                  className="w-full rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-semibold text-neutral-900 outline-none placeholder:text-neutral-400 dark:border-white/10 dark:bg-neutral-950/40 dark:text-white"
-                />
-              </label>
-
-              <label className="space-y-1">
-                <div className="text-[11px] font-bold text-neutral-700 dark:text-neutral-200">ประสบการณ์</div>
-                <select
-                  value={profile.experience ?? 'beginner'}
-                  onChange={(e) => setProfile((p) => ({ ...p, experience: e.target.value as Experience }))}
-                  className="w-full rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-semibold text-neutral-900 outline-none dark:border-white/10 dark:bg-neutral-950/40 dark:text-white"
-                >
-                  <option value="beginner">เริ่มต้น</option>
-                  <option value="intermediate">ปานกลาง</option>
-                  <option value="advanced">จริงจัง</option>
-                </select>
-              </label>
-
-              <label className="space-y-1">
-                <div className="text-[11px] font-bold text-neutral-700 dark:text-neutral-200">วันซ้อม/สัปดาห์</div>
-                <input
-                  inputMode="numeric"
-                  value={draftProfile.trainingDaysPerWeek}
-                  onChange={(e) => setDraftProfile((d) => ({ ...d, trainingDaysPerWeek: e.target.value }))}
-                  onBlur={() => commitNumber('trainingDaysPerWeek', draftProfile.trainingDaysPerWeek, { min: 0, max: 7 })}
-                  className="w-full rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-semibold text-neutral-900 outline-none dark:border-white/10 dark:bg-neutral-950/40 dark:text-white"
-                />
-              </label>
-
-              <label className="space-y-1 sm:col-span-2">
-                <div className="text-[11px] font-bold text-neutral-700 dark:text-neutral-200">รายละเอียดเพิ่มเติม (optional)</div>
-                <textarea
-                  rows={3}
-                  value={profile.goalDetail ?? ''}
-                  onChange={(e) => setProfile((p) => ({ ...p, goalDetail: e.target.value }))}
-                  placeholder="เช่น อยากลด 4 กก. ใน 8 สัปดาห์ / นอนน้อย / แพ้อาหาร..."
-                  className="w-full resize-none rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-semibold text-neutral-900 outline-none placeholder:text-neutral-400 dark:border-white/10 dark:bg-neutral-950/40 dark:text-white"
-                />
-              </label>
-            </div>
-
-            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-[11px] text-neutral-600 dark:text-neutral-300">
-                ตรวจความพร้อม: <b>{canSubmit ? 'พร้อม' : 'กรุณาตรวจอายุ/ส่วนสูง/น้ำหนัก'}</b>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <label className="space-y-2">
+                      <div className="text-sm font-bold text-neutral-900 dark:text-white">อายุ (ปี)</div>
+                      <input
+                        inputMode="numeric"
+                        placeholder="25"
+                        value={draftProfile.ageYears}
+                        onChange={(e) => setDraftProfile((d) => ({ ...d, ageYears: e.target.value }))}
+                        onBlur={() => commitNumber('ageYears', draftProfile.ageYears, { min: 10, max: 90 })}
+                        className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-lg font-bold text-neutral-900 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-neutral-800 dark:bg-neutral-950 dark:text-white"
+                      />
+                    </label>
+                    <label className="space-y-2">
+                      <div className="text-sm font-bold text-neutral-900 dark:text-white">ส่วนสูง (cm)</div>
+                      <input
+                        inputMode="numeric"
+                        placeholder="170"
+                        value={draftProfile.heightCm}
+                        onChange={(e) => setDraftProfile((d) => ({ ...d, heightCm: e.target.value }))}
+                        onBlur={() => commitNumber('heightCm', draftProfile.heightCm, { min: 120, max: 230 })}
+                        className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-lg font-bold text-neutral-900 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-neutral-800 dark:bg-neutral-950 dark:text-white"
+                      />
+                    </label>
+                    <label className="space-y-2">
+                      <div className="text-sm font-bold text-neutral-900 dark:text-white">น้ำหนัก (kg)</div>
+                      <input
+                        inputMode="numeric"
+                        placeholder="70"
+                        value={draftProfile.weightKg}
+                        onChange={(e) => setDraftProfile((d) => ({ ...d, weightKg: e.target.value }))}
+                        onBlur={() => commitNumber('weightKg', draftProfile.weightKg, { min: 30, max: 250 })}
+                        className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-lg font-bold text-neutral-900 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-neutral-800 dark:bg-neutral-950 dark:text-white"
+                      />
+                    </label>
+                  </div>
+                </div>
               </div>
 
               <button
-                type="button"
-                  onClick={() => void sendToCoach('ช่วยสรุปเป้าหมายและวางแผนเริ่มต้น 7 วันให้หน่อย')}
-                disabled={!canSubmit || submitting}
+                onClick={nextStep}
+                disabled={!canSubmit}
                 className={cn(
-                  'inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-extrabold transition',
-                  !canSubmit || submitting
-                    ? 'cursor-not-allowed bg-gray-200 text-gray-500 dark:bg-white/10 dark:text-neutral-500'
-                    : 'bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200',
+                  'flex w-full items-center justify-center gap-2 rounded-2xl py-4 text-base font-bold transition',
+                  canSubmit
+                    ? 'bg-neutral-900 text-white shadow-lg shadow-neutral-900/20 hover:scale-[1.02] active:scale-[0.98] dark:bg-white dark:text-neutral-900'
+                    : 'cursor-not-allowed bg-neutral-200 text-neutral-400 dark:bg-neutral-800 dark:text-neutral-600'
                 )}
               >
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                  ขอแผนเริ่มต้น
+                ถัดไป <ChevronRight className="h-5 w-5" />
               </button>
-            </div>
+            </motion.div>
+          )}
 
-            {apiError && (
-              <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-500/20 dark:bg-rose-950/25 dark:text-rose-200">
-                {apiError}
-              </div>
-            )}
-          </section>
-
-          {/* Results */}
-          <section className="rounded-[28px] border border-black/5 bg-white/70 p-5 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-neutral-900/40">
-            <div className="flex items-center gap-2">
-              <div className="grid h-9 w-9 place-items-center rounded-2xl bg-neutral-900/10 text-neutral-900 ring-1 ring-black/10 dark:bg-white/10 dark:text-white dark:ring-white/10">
-                <Info className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="text-sm font-extrabold text-neutral-900 dark:text-white">สรุปตัวเลข (คำนวณทันที)</div>
-                <div className="text-[11px] text-neutral-500 dark:text-neutral-400">ค่าด้านล่างเป็นการประมาณเพื่อช่วยวางแผน</div>
-              </div>
-            </div>
-
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="rounded-3xl bg-black/5 p-4 dark:bg-white/5">
-                <div className="text-[11px] font-bold text-neutral-600 dark:text-neutral-300">BMI</div>
-                <div className="mt-1 text-xl font-extrabold text-neutral-900 dark:text-white">{derived.bmi ? derived.bmi.toFixed(1) : '-'}</div>
-                <div className="mt-1 text-xs text-neutral-600 dark:text-neutral-300">{derived.bmiCategory}</div>
-                <div className="mt-2 text-[11px] text-neutral-500 dark:text-neutral-400">
-                  ช่วงน้ำหนักเหมาะสม (ประมาณ): {derived.healthyWeightKg[0].toFixed(1)}–{derived.healthyWeightKg[1].toFixed(1)} kg
-                </div>
+          {step === 2 && (
+            <motion.div
+              key="step2"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-6"
+            >
+              <div className="text-center">
+                <h1 className="text-2xl font-extrabold text-neutral-900 dark:text-white">กิจกรรมของคุณ</h1>
+                <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">ช่วยให้เราคำนวณการเผาผลาญได้แม่นยำขึ้น</p>
               </div>
 
-              <div className="rounded-3xl bg-black/5 p-4 dark:bg-white/5">
-                <div className="text-[11px] font-bold text-neutral-600 dark:text-neutral-300">พลังงาน/วัน</div>
-                <div className="mt-2 grid grid-cols-3 gap-2 text-center">
-                  <div className="rounded-2xl bg-white/70 px-2 py-2 dark:bg-neutral-950/30">
-                    <div className="text-[10px] text-neutral-500 dark:text-neutral-400">BMR</div>
-                    <div className="text-sm font-extrabold">{round(derived.bmr)}</div>
-                  </div>
-                  <div className="rounded-2xl bg-white/70 px-2 py-2 dark:bg-neutral-950/30">
-                    <div className="text-[10px] text-neutral-500 dark:text-neutral-400">TDEE</div>
-                    <div className="text-sm font-extrabold">{round(derived.tdee)}</div>
-                  </div>
-                  <div className="rounded-2xl bg-white/70 px-2 py-2 dark:bg-neutral-950/30">
-                    <div className="text-[10px] text-neutral-500 dark:text-neutral-400">เป้า</div>
-                    <div className="text-sm font-extrabold">{round(derived.target)}</div>
-                  </div>
-                </div>
-                <div className="mt-2 text-[11px] text-neutral-500 dark:text-neutral-400">
-                  เป้าหมาย: <b>{goalLabelTh(profile.goal)}</b> • โปรตีนแนะนำ: <b>{derived.proteinRange[0]}–{derived.proteinRange[1]} g/วัน</b>
-                </div>
-                {derived.desiredDeltaKgPerWeek !== null && (
-                  <div className="mt-2 text-[11px] text-neutral-500 dark:text-neutral-400">
-                    ความเร็วตามเป้า: <b>{derived.desiredDeltaKgPerWeek.toFixed(2)} กก./สัปดาห์</b>
-                    <div className="mt-1">{derived.safePace.messageTh}</div>
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded-3xl bg-black/5 p-4 dark:bg-white/5">
-                <div className="text-[11px] font-bold text-neutral-600 dark:text-neutral-300">% ไขมัน (US Navy)</div>
-                <div className="mt-1 text-xs text-neutral-600 dark:text-neutral-300">
-                  {derived.bodyFat !== null ? (
-                    <>
-                      ประมาณ: <b>{derived.bodyFat.toFixed(1)}%</b>
-                      <div className="mt-1 text-[11px] text-neutral-500 dark:text-neutral-400">
-                        ใช้รอบเอว+คอ{profile.sex === 'female' ? '+สะโพก' : ''} (หน่วยนิ้ว) • เป็นการประมาณคร่าว ๆ
-                      </div>
-                    </>
-                  ) : (
-                    <>กรอก “รอบเอว” และ “รอบคอ”{profile.sex === 'female' ? ' และ “รอบสะโพก”' : ''} เพื่อคำนวณ</>
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded-3xl bg-black/5 p-4 dark:bg-white/5">
-                <div className="text-[11px] font-bold text-neutral-600 dark:text-neutral-300">สัดส่วน (จากรอบเอว)</div>
-                <div className="mt-1 text-xs text-neutral-600 dark:text-neutral-300">
-                  {derived.whtr ? (
-                    <>
-                      WHtR (เอว/ส่วนสูง): <b>{derived.whtr.toFixed(2)}</b>
-                      <div className="mt-1 text-[11px] text-neutral-500 dark:text-neutral-400">
-                        แนวทางทั่วไป: &lt; 0.50 มักถือว่าเสี่ยงต่ำกว่า (ประเมินคร่าว ๆ)
-                      </div>
-                    </>
-                  ) : (
-                    'ใส่รอบเอวเพื่อคำนวณ WHtR'
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded-3xl bg-black/5 p-4 dark:bg-white/5">
-                <div className="text-[11px] font-bold text-neutral-600 dark:text-neutral-300">เอว/สะโพก</div>
-                <div className="mt-1 text-xs text-neutral-600 dark:text-neutral-300">
-                  {derived.whr ? (
-                    <>
-                      WHR (เอว/สะโพก): <b>{derived.whr.toFixed(2)}</b>
-                      <div className="mt-1 text-[11px] text-neutral-500 dark:text-neutral-400">
-                        โดยทั่วไป: ยิ่งต่ำยิ่งดี (เกณฑ์ต่างกันตามเพศและอายุ)
-                      </div>
-                    </>
-                  ) : (
-                    'ใส่รอบเอว + รอบสะโพกเพื่อคำนวณ WHR'
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Chat */}
-            <div className="mt-4 rounded-[28px] border border-black/5 bg-white/60 p-4 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-neutral-950/20">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <div className="grid h-9 w-9 place-items-center rounded-2xl bg-violet-500/15 text-violet-700 ring-1 ring-violet-500/20 dark:bg-violet-400/10 dark:text-violet-200 dark:ring-violet-400/20">
-                    <MessageCircle className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <div className="text-sm font-extrabold text-neutral-900 dark:text-white">แชทกับโค้ช</div>
-                    <div className="text-[11px] text-neutral-500 dark:text-neutral-400">ถาม‑ตอบต่อเนื่องได้เรื่อย ๆ (บันทึกอัตโนมัติ)</div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={resetChat}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-black/10 bg-white/70 px-3 py-2 text-xs font-extrabold text-neutral-900 transition hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                  รีเซ็ตแชท
-                </button>
-              </div>
-
-              <div className="mt-3 max-h-[52vh] space-y-2 overflow-auto rounded-2xl bg-black/5 p-3 dark:bg-white/5">
-                {messages.map((m) => (
-                  <div
-                    key={m.id}
+              <div className="space-y-4">
+                {Object.keys(ACTIVITY_MULTIPLIERS).map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => setProfile((p) => ({ ...p, activity: k as ActivityLevel }))}
                     className={cn(
-                      'rounded-2xl px-3 py-2 text-[13px] leading-relaxed',
-                      m.role === 'user'
-                        ? 'ml-auto w-[92%] bg-white/80 text-neutral-900 dark:bg-neutral-950/40 dark:text-white'
-                        : 'mr-auto w-[92%] bg-emerald-500/10 text-neutral-900 dark:bg-emerald-400/10 dark:text-neutral-100',
+                      'flex w-full items-center gap-4 rounded-2xl border p-4 text-left transition',
+                      profile.activity === k
+                        ? 'border-emerald-500 bg-emerald-50/50 ring-1 ring-emerald-500 dark:border-emerald-500 dark:bg-emerald-500/10'
+                        : 'border-black/5 bg-white hover:bg-neutral-50 dark:border-white/10 dark:bg-neutral-900 dark:hover:bg-neutral-800'
                     )}
                   >
-                    {m.role === 'assistant' ? (
-                      <div className="coach-markdown prose prose-sm max-w-none dark:prose-invert">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
-                          {m.text}
-                        </ReactMarkdown>
+                    <div className={cn(
+                      'grid h-10 w-10 shrink-0 place-items-center rounded-full',
+                      profile.activity === k ? 'bg-emerald-500 text-white' : 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800'
+                    )}>
+                      <Activity className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className={cn("font-bold", profile.activity === k ? "text-emerald-700 dark:text-emerald-400" : "text-neutral-900 dark:text-white")}>
+                        {k === 'sedentary' && 'นั่งทำงานเป็นหลัก'}
+                        {k === 'light' && 'ขยับบ้างเล็กน้อย'}
+                        {k === 'moderate' && 'ปานกลาง'}
+                        {k === 'active' && 'แอคทีฟมาก'}
+                        {k === 'athlete' && 'นักกีฬา'}
                       </div>
-                    ) : (
-                      <div className="whitespace-pre-wrap">{m.text}</div>
-                    )}
-                  </div>
+                      <div className="text-xs text-neutral-500 dark:text-neutral-400">{activityLabelTh(k as ActivityLevel)}</div>
+                    </div>
+                    {profile.activity === k && <CheckCircle2 className="ml-auto h-5 w-5 text-emerald-500" />}
+                  </button>
                 ))}
-                {submitting && (
-                  <div className="mr-auto w-[92%] rounded-2xl bg-emerald-500/10 px-3 py-2 text-[13px] text-neutral-900 dark:bg-emerald-400/10 dark:text-neutral-100">
-                    <span className="inline-flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      โค้ชกำลังคิดคำตอบ...
-                    </span>
-                  </div>
-                )}
-                <div ref={messagesEndRef} />
               </div>
 
-              {followUps.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {followUps.map((q) => (
-                    <button
-                      key={q}
-                      type="button"
-                      onClick={() => void sendToCoach(q)}
-                      className="rounded-2xl border border-black/10 bg-white/70 px-3 py-2 text-xs font-extrabold text-neutral-900 transition hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
-                    >
-                      {q}
-                    </button>
-                  ))}
-                </div>
-              )}
+              <div className="rounded-4xl border border-black/5 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-neutral-900">
+                <label className="space-y-3">
+                  <div className="text-sm font-bold text-neutral-900 dark:text-white">ประสบการณ์ออกกำลังกาย</div>
+                  <div className="flex gap-2 rounded-2xl bg-neutral-100 p-1 dark:bg-neutral-800">
+                    {(['beginner', 'intermediate', 'advanced'] as const).map((exp) => (
+                      <button
+                        key={exp}
+                        onClick={() => setProfile((p) => ({ ...p, experience: exp }))}
+                        className={cn(
+                          'flex-1 rounded-xl py-2 text-xs font-bold transition',
+                          profile.experience === exp
+                            ? 'bg-white text-neutral-900 shadow-sm dark:bg-neutral-700 dark:text-white'
+                            : 'text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white'
+                        )}
+                      >
+                        {exp === 'beginner' && 'เริ่มต้น'}
+                        {exp === 'intermediate' && 'ปานกลาง'}
+                        {exp === 'advanced' && 'จริงจัง'}
+                      </button>
+                    ))}
+                  </div>
+                </label>
+              </div>
 
-              <div className="mt-3 flex gap-2">
-                <textarea
-                  rows={2}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  placeholder="พิมพ์คำถาม เช่น ‘วันนี้ควรกินอะไรให้ถึงโปรตีน?’"
-                  className="flex-1 resize-none rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm font-semibold text-neutral-900 outline-none placeholder:text-neutral-400 dark:border-white/10 dark:bg-neutral-950/40 dark:text-white"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      void sendDraft();
-                    }
-                  }}
-                />
+              <div className="flex gap-3">
                 <button
-                  type="button"
-                  onClick={() => void sendDraft()}
-                  disabled={!draft.trim() || submitting}
-                  className={cn(
-                    'inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-extrabold transition',
-                    !draft.trim() || submitting
-                      ? 'cursor-not-allowed bg-gray-200 text-gray-500 dark:bg-white/10 dark:text-neutral-500'
-                      : 'bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200',
-                  )}
+                  onClick={prevStep}
+                  className="flex h-14 w-14 items-center justify-center rounded-2xl border border-neutral-200 bg-white text-neutral-900 transition hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:text-white"
                 >
-                  <Send className="h-4 w-4" />
-                  ส่ง
+                  <ChevronLeft className="h-6 w-6" />
+                </button>
+                <button
+                  onClick={nextStep}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-neutral-900 text-base font-bold text-white shadow-lg shadow-neutral-900/20 transition hover:scale-[1.02] active:scale-[0.98] dark:bg-white dark:text-neutral-900"
+                >
+                  ถัดไป <ChevronRight className="h-5 w-5" />
                 </button>
               </div>
-            </div>
-          </section>
-        </div>
+            </motion.div>
+          )}
+
+          {step === 3 && (
+            <motion.div
+              key="step3"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-6"
+            >
+              <div className="text-center">
+                <h1 className="text-2xl font-extrabold text-neutral-900 dark:text-white">สัดส่วนร่างกาย</h1>
+                <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">กรอกเท่าที่ทราบ (ช่วยคำนวณ % ไขมัน)</p>
+              </div>
+
+              <div className="rounded-4xl border border-black/5 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-neutral-900">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <label className="space-y-2">
+                    <div className="text-sm font-bold text-neutral-900 dark:text-white">รอบเอว (นิ้ว)</div>
+                    <input
+                      inputMode="decimal"
+                      placeholder="32"
+                      value={draftProfile.waistIn}
+                      onChange={(e) => setDraftProfile((d) => ({ ...d, waistIn: e.target.value }))}
+                      onBlur={() => commitNumber('waistIn', draftProfile.waistIn, { min: 1, max: 90 })}
+                      className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm font-bold text-neutral-900 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-neutral-800 dark:bg-neutral-950 dark:text-white"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <div className="text-sm font-bold text-neutral-900 dark:text-white">รอบสะโพก (นิ้ว)</div>
+                    <input
+                      inputMode="decimal"
+                      placeholder="38"
+                      value={draftProfile.hipIn}
+                      onChange={(e) => setDraftProfile((d) => ({ ...d, hipIn: e.target.value }))}
+                      onBlur={() => commitNumber('hipIn', draftProfile.hipIn, { min: 1, max: 120 })}
+                      className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm font-bold text-neutral-900 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-neutral-800 dark:bg-neutral-950 dark:text-white"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <div className="text-sm font-bold text-neutral-900 dark:text-white">รอบอก (นิ้ว)</div>
+                    <input
+                      inputMode="decimal"
+                      placeholder="40"
+                      value={draftProfile.chestIn}
+                      onChange={(e) => setDraftProfile((d) => ({ ...d, chestIn: e.target.value }))}
+                      onBlur={() => commitNumber('chestIn', draftProfile.chestIn, { min: 1, max: 120 })}
+                      className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm font-bold text-neutral-900 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-neutral-800 dark:bg-neutral-950 dark:text-white"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <div className="text-sm font-bold text-neutral-900 dark:text-white">รอบคอ (นิ้ว)</div>
+                    <input
+                      inputMode="decimal"
+                      placeholder="15"
+                      value={draftProfile.neckIn}
+                      onChange={(e) => setDraftProfile((d) => ({ ...d, neckIn: e.target.value }))}
+                      onBlur={() => commitNumber('neckIn', draftProfile.neckIn, { min: 1, max: 40 })}
+                      className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm font-bold text-neutral-900 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-neutral-800 dark:bg-neutral-950 dark:text-white"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={prevStep}
+                  className="flex h-14 w-14 items-center justify-center rounded-2xl border border-neutral-200 bg-white text-neutral-900 transition hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:text-white"
+                >
+                  <ChevronLeft className="h-6 w-6" />
+                </button>
+                <button
+                  onClick={nextStep}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-neutral-900 text-base font-bold text-white shadow-lg shadow-neutral-900/20 transition hover:scale-[1.02] active:scale-[0.98] dark:bg-white dark:text-neutral-900"
+                >
+                  ถัดไป <ChevronRight className="h-5 w-5" />
+                </button>
+              </div>
+              <button onClick={nextStep} className="mx-auto block text-xs font-bold text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300">
+                ข้ามไปก่อน
+              </button>
+            </motion.div>
+          )}
+
+          {step === 4 && (
+            <motion.div
+              key="step4"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-6"
+            >
+              <div className="text-center">
+                <h1 className="text-2xl font-extrabold text-neutral-900 dark:text-white">เป้าหมายของคุณ</h1>
+                <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">เราจะช่วยวางแผนให้คุณไปถึงเป้าหมาย</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {(['lose_weight', 'lose_fat', 'maintain', 'gain_muscle', 'gain_weight'] as const).map((g) => (
+                  <button
+                    key={g}
+                    onClick={() => setProfile((p) => ({ ...p, goal: g }))}
+                    className={cn(
+                      'flex flex-col items-center justify-center gap-2 rounded-2xl border p-4 transition',
+                      profile.goal === g
+                        ? 'border-emerald-500 bg-emerald-50/50 text-emerald-700 dark:border-emerald-500 dark:bg-emerald-500/10 dark:text-emerald-400'
+                        : 'border-black/5 bg-white text-neutral-600 hover:bg-neutral-50 dark:border-white/10 dark:bg-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800'
+                    )}
+                  >
+                    {g === 'lose_weight' && <Weight className="h-6 w-6" />}
+                    {g === 'lose_fat' && <Flame className="h-6 w-6" />}
+                    {g === 'maintain' && <Activity className="h-6 w-6" />}
+                    {g === 'gain_muscle' && <Dumbbell className="h-6 w-6" />}
+                    {g === 'gain_weight' && <Plus className="h-6 w-6" />}
+                    <span className="text-xs font-bold">{goalLabelTh(g)}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="rounded-4xl border border-black/5 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-neutral-900">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <label className="space-y-2">
+                    <div className="text-sm font-bold text-neutral-900 dark:text-white">น้ำหนักเป้าหมาย (kg)</div>
+                    <input
+                      inputMode="decimal"
+                      placeholder="Optional"
+                      value={draftProfile.targetWeightKg}
+                      onChange={(e) => setDraftProfile((d) => ({ ...d, targetWeightKg: e.target.value }))}
+                      onBlur={() => commitNumber('targetWeightKg', draftProfile.targetWeightKg, { min: 30, max: 300 })}
+                      className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm font-bold text-neutral-900 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-neutral-800 dark:bg-neutral-950 dark:text-white"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <div className="text-sm font-bold text-neutral-900 dark:text-white">ระยะเวลา (สัปดาห์)</div>
+                    <input
+                      inputMode="numeric"
+                      placeholder="8"
+                      value={draftProfile.targetWeeks}
+                      onChange={(e) => setDraftProfile((d) => ({ ...d, targetWeeks: e.target.value }))}
+                      onBlur={() => commitNumber('targetWeeks', draftProfile.targetWeeks, { min: 1, max: 52 })}
+                      className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm font-bold text-neutral-900 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-neutral-800 dark:bg-neutral-950 dark:text-white"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <div className="text-sm font-bold text-neutral-900 dark:text-white">วันซ้อม/สัปดาห์</div>
+                    <input
+                      inputMode="numeric"
+                      placeholder="3"
+                      value={draftProfile.trainingDaysPerWeek}
+                      onChange={(e) => setDraftProfile((d) => ({ ...d, trainingDaysPerWeek: e.target.value }))}
+                      onBlur={() => commitNumber('trainingDaysPerWeek', draftProfile.trainingDaysPerWeek, { min: 0, max: 7 })}
+                      className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm font-bold text-neutral-900 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-neutral-800 dark:bg-neutral-950 dark:text-white"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={prevStep}
+                  className="flex h-14 w-14 items-center justify-center rounded-2xl border border-neutral-200 bg-white text-neutral-900 transition hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:text-white"
+                >
+                  <ChevronLeft className="h-6 w-6" />
+                </button>
+                <button
+                  onClick={() => {
+                    if (submitting) return;
+                    nextStep();
+                    void sendToCoach('ช่วยสรุปเป้าหมายและวางแผนเริ่มต้น 7 วันให้หน่อย');
+                  }}
+                  disabled={submitting}
+                  className={cn(
+                    'flex flex-1 items-center justify-center gap-2 rounded-2xl bg-neutral-900 text-base font-bold text-white shadow-lg shadow-neutral-900/20 transition hover:scale-[1.02] active:scale-[0.98] dark:bg-white dark:text-neutral-900',
+                    submitting && 'cursor-not-allowed opacity-70'
+                  )}
+                >
+                  {submitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}
+                  สร้างแผน
+                </button>
+              </div>
+              {apiError && (
+                <div className="mt-2 text-center text-xs font-medium text-rose-500 dark:text-rose-400">
+                  {apiError}
+                </div>
+              )}
+            </motion.div>
+          )}
+
+          {step === 5 && (
+            <motion.div
+              key="step5"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-6"
+            >
+              {/* Dashboard Header */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-2xl font-extrabold text-neutral-900 dark:text-white">แดชบอร์ด</h1>
+                  <p className="text-sm text-neutral-500 dark:text-neutral-400">สรุปข้อมูลและคำแนะนำจากโค้ช</p>
+                </div>
+                <button
+                  onClick={() => setStep(1)}
+                  className="rounded-full bg-neutral-100 px-4 py-2 text-xs font-bold text-neutral-600 transition hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+                >
+                  แก้ไขข้อมูล
+                </button>
+              </div>
+
+              {/* Stats Grid */}
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-3xl bg-white p-4 shadow-sm dark:bg-neutral-900">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">BMI</div>
+                  <div className="mt-1 text-2xl font-extrabold text-neutral-900 dark:text-white">{derived.bmi.toFixed(1)}</div>
+                  <div className="text-xs font-medium text-emerald-600 dark:text-emerald-400">{derived.bmiCategory}</div>
+                </div>
+                <div className="rounded-3xl bg-white p-4 shadow-sm dark:bg-neutral-900">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">TDEE</div>
+                  <div className="mt-1 text-2xl font-extrabold text-neutral-900 dark:text-white">{round(derived.tdee)}</div>
+                  <div className="text-xs text-neutral-500">kcal/day</div>
+                </div>
+                <div className="rounded-3xl bg-emerald-500 p-4 text-white shadow-lg shadow-emerald-500/20 dark:bg-emerald-600">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-100">เป้าหมาย</div>
+                  <div className="mt-1 text-2xl font-extrabold">{round(derived.target)}</div>
+                  <div className="text-xs text-emerald-100">kcal/day</div>
+                </div>
+                <div className="rounded-3xl bg-white p-4 shadow-sm dark:bg-neutral-900">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">โปรตีน</div>
+                  <div className="mt-1 text-xl font-extrabold text-neutral-900 dark:text-white">{derived.proteinRange[0]}-{derived.proteinRange[1]}</div>
+                  <div className="text-xs text-neutral-500">g/day</div>
+                </div>
+              </div>
+
+              {/* Chat Interface */}
+              <div className="flex h-[65vh] sm:h-150 flex-col overflow-hidden rounded-4xl border border-black/5 bg-white shadow-sm dark:border-white/10 dark:bg-neutral-900">
+                <div className="border-b border-neutral-100 bg-white/50 px-6 py-4 backdrop-blur-md dark:border-neutral-800 dark:bg-neutral-900/50">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="grid h-10 w-10 place-items-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
+                        <Sparkles className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold text-neutral-900 dark:text-white">AI Coach</div>
+                        <div className="text-xs text-neutral-500 dark:text-neutral-400">พร้อมให้คำแนะนำตลอด 24 ชม.</div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={resetChat}
+                      className="rounded-full p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+                    >
+                      <RefreshCw className="h-5 w-5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-neutral-50/50 dark:bg-neutral-950/50">
+                  {messages.map((m) => (
+                    <div
+                      key={m.id}
+                      className={cn(
+                        'flex w-full',
+                        m.role === 'user' ? 'justify-end' : 'justify-start'
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          'max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm',
+                          m.role === 'user'
+                            ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900'
+                            : 'bg-white text-neutral-900 dark:bg-neutral-800 dark:text-white'
+                        )}
+                      >
+                        {m.role === 'assistant' ? (
+                          <div className="coach-markdown prose prose-sm max-w-none dark:prose-invert">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+                              {m.text}
+                            </ReactMarkdown>
+                          </div>
+                        ) : (
+                          <div className="whitespace-pre-wrap">{m.text}</div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {submitting && (
+                    <div className="flex justify-start">
+                      <div className="flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm text-neutral-500 shadow-sm dark:bg-neutral-800 dark:text-neutral-400">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        กำลังพิมพ์...
+                      </div>
+                    </div>
+                  )}
+                  <div ref={messagesEndRef} />
+                </div>
+
+                <div className="border-t border-neutral-100 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
+                  {apiError && (
+                    <div className="mb-2 text-xs font-medium text-rose-500 dark:text-rose-400">
+                      {apiError}
+                    </div>
+                  )}
+                  {followUps.length > 0 && (
+                    <div className="mb-3 flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                      {followUps.map((q) => (
+                        <button
+                          key={q}
+                          onClick={() => void sendToCoach(q)}
+                          className="whitespace-nowrap rounded-full border border-neutral-200 bg-white px-4 py-2 text-xs font-bold text-neutral-600 transition hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <input
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      placeholder="พิมพ์ข้อความ..."
+                      className="flex-1 rounded-full border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm font-medium outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          void sendDraft();
+                        }
+                      }}
+                    />
+                    <button
+                      onClick={() => void sendDraft()}
+                      disabled={!draft.trim() || submitting}
+                      className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500 text-white transition hover:bg-emerald-600 disabled:opacity-50"
+                    >
+                      <Send className="h-5 w-5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
 
-      {/* Center success popup */}
       <AnimatePresence>
         {successOpen && (
           <motion.div
-            className="fixed inset-0 z-80 flex items-center justify-center"
+            className="fixed inset-0 z-50 flex items-center justify-center px-4"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSuccessOpen(false)} />
             <motion.div
-              className="absolute inset-0 bg-black/35 backdrop-blur-[2px]"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSuccessOpen(false)}
-            />
-            <motion.div
-              initial={{ opacity: 0, y: 12, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 12, scale: 0.98 }}
-              transition={{ type: 'spring', stiffness: 520, damping: 38 }}
-              className="relative mx-4 w-[min(520px,calc(100vw-2rem))] overflow-hidden rounded-[28px] border border-white/20 bg-white/85 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-950/70"
-              role="status"
-              aria-live="polite"
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative rounded-4xl bg-white p-6 shadow-2xl dark:bg-neutral-900"
             >
-              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_0%,rgba(16,185,129,0.22),transparent_60%),radial-gradient(60%_60%_at_0%_100%,rgba(59,130,246,0.16),transparent_55%)]" />
-              <div className="relative flex items-center gap-4">
-                <div className="grid h-14 w-14 place-items-center rounded-3xl bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/20 dark:bg-emerald-400/10 dark:text-emerald-200 dark:ring-emerald-400/20">
-                  <CheckCircle2 className="h-7 w-7" />
+              <div className="flex flex-col items-center gap-4 text-center">
+                <div className="grid h-16 w-16 place-items-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
+                  <CheckCircle2 className="h-8 w-8" />
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-extrabold tracking-tight text-neutral-900 dark:text-white">เรียบร้อย</div>
-                  <div className="mt-0.5 text-xs text-neutral-600 dark:text-neutral-300">ได้รับคำแนะนำจากโค้ชแล้ว</div>
+                <div>
+                  <h3 className="text-xl font-bold text-neutral-900 dark:text-white">เรียบร้อย!</h3>
+                  <p className="text-sm text-neutral-500 dark:text-neutral-400">โค้ชได้รับข้อมูลของคุณแล้ว</p>
                 </div>
               </div>
             </motion.div>

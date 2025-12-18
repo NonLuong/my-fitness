@@ -16,9 +16,6 @@ import {
   ListPlus,
   Trash2,
   Sparkles,
-  Sun,
-  Moon,
-  Monitor,
   Plus,
 } from 'lucide-react';
 
@@ -27,6 +24,7 @@ import { resolveExerciseDetailFromLabel } from '@/lib/exercises';
 import { ConfirmDialog } from './_components/ConfirmDialog';
 import { MobileTabs, type MobileTab } from './_components/MobileTabs';
 import { fadeUp, springy, staggerContainer } from './_components/utils/motion';
+import { Header } from './_components/Header';
 import { NutritionSection } from './_components/sections/NutritionSection';
 import type { MealEntry, MealType } from './_components/types/nutrition';
 
@@ -57,8 +55,6 @@ type WorkoutState = Record<string, WorkoutItemState>;
 type ScheduleType = {
   [key: number]: DailySchedule;
 };
-
-type ThemeMode = 'light' | 'dark' | 'system';
 
 const MOBILE_TAB_STORAGE_KEY = 'ui_mobileTab_v1';
 
@@ -154,32 +150,6 @@ const SCHEDULE: ScheduleType = {
 };
 
 function FitnessApp() {
-  // --- Theme Logic ---
-  const [theme, setTheme] = useState<ThemeMode>('system');
-
-  // Effect to apply theme to HTML tag
-  useEffect(() => {
-    const root = window.document.documentElement;
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-
-    const applyTheme = (mode: ThemeMode) => {
-      if (mode === 'dark' || (mode === 'system' && mediaQuery.matches)) {
-        root.classList.add('dark');
-      } else {
-        root.classList.remove('dark');
-      }
-    };
-
-    applyTheme(theme);
-
-    const handleSystemChange = () => {
-      if (theme === 'system') applyTheme('system');
-    };
-
-    mediaQuery.addEventListener('change', handleSystemChange);
-    return () => mediaQuery.removeEventListener('change', handleSystemChange);
-  }, [theme]);
-
   // --- Logic ---
   const today = new Date();
   const dayOfWeek = today.getDay();
@@ -896,59 +866,7 @@ function FitnessApp() {
         }}
       />
 
-      {/* Navbar */}
-      <nav
-        className={`sticky top-0 z-50 px-6 py-4 backdrop-blur-xl border-b transition-colors duration-300 bg-white/70 border-gray-200 dark:bg-neutral-950/70 dark:border-white/5`}
-      >
-        <div className="max-w-6xl mx-auto flex justify-between items-center">
-          <div className="flex items-center gap-2">
-            <div className="bg-emerald-500 p-2 rounded-lg shadow-lg shadow-emerald-500/20">
-              <Dumbbell className="w-5 h-5 text-white dark:text-neutral-950" />
-            </div>
-            <span className="font-bold text-lg tracking-tight text-neutral-800 dark:text-white">
-              FitTrack<span className="text-emerald-600 dark:text-emerald-500">.Pro</span>
-            </span>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {/* Theme Toggle */}
-            <div className="flex items-center bg-gray-100 dark:bg-white/5 rounded-full p-1 border border-gray-200 dark:border-white/5">
-              {[
-                { mode: 'light', icon: Sun },
-                { mode: 'system', icon: Monitor },
-                { mode: 'dark', icon: Moon },
-              ].map((item) => (
-                <button
-                  key={item.mode}
-                  onClick={() => setTheme(item.mode as ThemeMode)}
-                  className={`p-1.5 rounded-full transition-all duration-200 ${theme === item.mode
-                      ? 'bg-white dark:bg-neutral-800 text-emerald-600 dark:text-emerald-400 shadow-sm'
-                      : 'text-gray-400 dark:text-neutral-500 hover:text-gray-600 dark:hover:text-neutral-300'
-                    }`}
-                >
-                  <item.icon className="w-4 h-4" />
-                </button>
-              ))}
-            </div>
-
-            <div className="hidden md:block text-xs font-medium px-3 py-1 rounded-full border transition-colors
-              bg-gray-100 text-gray-500 border-gray-200
-              dark:bg-white/5 dark:text-neutral-500 dark:border-white/5">
-              {today.toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' })}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setConfirmResetOpen(true)}
-              className="hidden sm:inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700 transition hover:bg-rose-100 dark:border-rose-500/20 dark:bg-rose-950/25 dark:text-rose-200 dark:hover:bg-rose-950/35"
-              aria-label="Reset day"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              Reset
-            </button>
-          </div>
-        </div>
-      </nav>
+      <Header onReset={() => setConfirmResetOpen(true)} />
 
   <main className="max-w-6xl mx-auto p-4 md:p-6 space-y-6">
 
@@ -1319,7 +1237,7 @@ function FitnessApp() {
                           </ul>
                         </div>
 
-                        <div className="rounded-3xl border border-white/35 bg-white/55 p-4 shadow-[0_18px_45px_-32px_rgba(0,0,0,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+                        <div className="rounded-3xl border border-white/35 bg-white/55 p-4 shadow-[0_18px_45px_-32px rgba(0,0,0,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
                           <div className="text-xs font-black tracking-wide text-neutral-800 dark:text-neutral-100">จังหวะ / การหายใจ</div>
                           <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-neutral-800 dark:text-neutral-200">
                             {(selectedExerciseDetail?.tempoBreathing ?? []).map((s, i) => (
@@ -1465,7 +1383,7 @@ function FitnessApp() {
                                   <span className="mx-2">•</span>
                                   {ev.category.replace('_', ' ')}
                                 </div>
-                              </div>
+                                                           </div>
                               <div className="font-bold text-emerald-600 dark:text-emerald-500">+{ev.grams}g</div>
                             </div>
                           ))}

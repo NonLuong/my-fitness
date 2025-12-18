@@ -193,7 +193,7 @@ ${history.length ? history.map((m) => `- ${m.role === 'user' ? 'ผู้ใช�
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
             config: {
               temperature: 0.2,
-              maxOutputTokens: 1200,
+              maxOutputTokens: 4096,
               responseMimeType: 'application/json',
             },
           });
@@ -267,7 +267,7 @@ ${history.length ? history.map((m) => `- ${m.role === 'user' ? 'ผู้ใช�
             ],
             config: {
               temperature: 0,
-              maxOutputTokens: 900,
+              maxOutputTokens: 4096,
               responseMimeType: 'application/json',
             },
           });
