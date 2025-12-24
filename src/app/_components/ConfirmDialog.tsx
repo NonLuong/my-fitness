@@ -54,18 +54,18 @@ export function ConfirmDialog(props: {
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-label={title}
-            className="fixed left-1/2 top-1/2 w-[min(92vw,520px)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-4xl border border-white/10 bg-white/85 shadow-2xl backdrop-blur-xl dark:bg-[#0a120f]/90 dark:border-white/10"
+            className="fixed left-1/2 top-1/2 w-[min(92vw,520px)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-4xl border border-white/10 bg-[#0a120f]/95 shadow-2xl backdrop-blur-xl"
           >
             <div className="p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="text-sm font-black tracking-tight text-neutral-950 dark:text-white">{title}</div>
+                  <div className="text-sm font-black tracking-tight text-white">{title}</div>
                   {description && (
-                    <div className="mt-1 text-xs text-neutral-600 dark:text-emerald-100/60">{description}</div>
+                    <div className="mt-1 text-xs text-emerald-100/60">{description}</div>
                   )}
                 </div>
                 <button
-                  className="rounded-2xl px-3 py-2 text-xs font-bold text-neutral-600 hover:bg-black/5 dark:text-emerald-100/60 dark:hover:bg-white/5"
+                  className="rounded-2xl px-3 py-2 text-xs font-bold text-emerald-100/60 hover:bg-white/5 hover:text-white transition-colors"
                   onClick={onClose}
                 >
                   Close
@@ -76,7 +76,7 @@ export function ConfirmDialog(props: {
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded-2xl border border-black/10 bg-white/70 px-4 py-2.5 text-xs font-bold text-neutral-800 shadow-sm transition hover:bg-white active:scale-[0.99] dark:border-white/10 dark:bg-emerald-950/30 dark:text-emerald-100 dark:hover:bg-emerald-900/50"
+                  className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-xs font-bold text-emerald-100 shadow-sm transition hover:bg-white/10 active:scale-[0.99]"
                 >
                   {cancelLabel}
                 </button>
@@ -95,7 +95,7 @@ export function ConfirmDialog(props: {
             </div>
 
             {variant === 'danger' && (
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-linear-to-b from-rose-500/12 to-transparent dark:from-rose-400/10" />
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-linear-to-b from-rose-500/10 to-transparent" />
             )}
           </motion.div>
         </motion.div>

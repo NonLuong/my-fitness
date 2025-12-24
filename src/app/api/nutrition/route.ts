@@ -16,6 +16,10 @@ type NutritionResult = {
   sodiumMg?: number | null;
   confidence: 'low' | 'medium' | 'high';
   notes: string[];
+  vitaminsAndMinerals?: string[];
+  healthBenefits?: string;
+  warnings?: string;
+  funFact?: string;
 };
 
 type ApiResponse = {
@@ -44,6 +48,10 @@ type GeminiResultItem = {
   sodiumMg?: unknown;
   confidence?: unknown;
   notes?: unknown;
+  vitaminsAndMinerals?: unknown;
+  healthBenefits?: unknown;
+  warnings?: unknown;
+  funFact?: unknown;
 };
 
 type FallbackEstimate = {
@@ -346,7 +354,11 @@ export async function POST(req: Request) {
       '      "sugarG": 0,\n' +
       '      "sodiumMg": 0,\n' +
       '      "confidence": "medium",\n' +
-      '      "notes": ["string"]\n' +
+      '      "notes": ["string"],\n' +
+      '      "vitaminsAndMinerals": ["string"],\n' +
+      '      "healthBenefits": "string",\n' +
+      '      "warnings": "string",\n' +
+      '      "funFact": "string"\n' +
       '    }\n' +
       '  ],\n' +
       '  "followUpQuestions": ["string"],\n' +
@@ -360,6 +372,10 @@ export async function POST(req: Request) {
   '- caloriesKcal/proteinG/carbsG/fatG: ต้องเป็นตัวเลขเสมอ (ห้ามเป็น null) ให้ประมาณแบบสมเหตุสมผล\n' +
   '- followUpQuestions: ถามสั้น ๆ ไม่เกิน 2 ข้อ เฉพาะกรณีที่คลุมเครือจริง ๆ (เช่น มีไข่ดาวไหม, ใช้หมูหรือไก่)\n' +
   '- notes และ reasoningSummary: สั้น กระชับ ไม่ต้องยาว แค่สรุปสมมติฐานหลัก ๆ\n' +
+  '- vitaminsAndMinerals: ระบุวิตามินและแร่ธาตุหลักที่มีในอาหารนี้ (เช่น ["Vitamin C", "Iron", "Calcium"])\n' +
+  '- healthBenefits: อธิบายประโยชน์ต่อสุขภาพสั้นๆ เป็นภาษาไทย (เช่น "ช่วยเสริมสร้างกล้ามเนื้อและซ่อมแซมส่วนที่สึกหรอ")\n' +
+  '- warnings: คำเตือนถ้ามี (เช่น "โซเดียมสูง ควรบริโภคแต่น้อย" หรือ "น้ำตาลสูง") ถ้าไม่มีให้เว้นว่าง\n' +
+  '- funFact: เกร็ดความรู้สนุกๆ เกี่ยวกับอาหารนี้ เป็นภาษาไทย\n' +
   '- ถ้ามีรูป ให้ใช้รูปช่วยปรับความแม่นยำ';
 
     const parts: object[] = [{ text: instruction } as object];
@@ -499,6 +515,10 @@ export async function POST(req: Request) {
 
           const notes = notesFromModel;
 
+          const vitaminsAndMinerals = Array.isArray(r?.vitaminsAndMinerals)
+            ? (r.vitaminsAndMinerals as unknown[]).map((x) => String(x))
+            : [];
+
           return {
             itemName: String(r?.itemName ?? 'มื้ออาหาร'),
             assumedServing: String(r?.assumedServing ?? ''),
@@ -512,6 +532,10 @@ export async function POST(req: Request) {
             sodiumMg: r?.sodiumMg === undefined ? undefined : clampNumber(r?.sodiumMg),
             confidence: normalizeConfidence(r?.confidence),
             notes,
+            vitaminsAndMinerals,
+            healthBenefits: r?.healthBenefits ? String(r.healthBenefits) : undefined,
+            warnings: r?.warnings ? String(r.warnings) : undefined,
+            funFact: r?.funFact ? String(r.funFact) : undefined,
           };
         })
       : [];

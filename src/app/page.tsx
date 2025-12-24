@@ -24,7 +24,10 @@ import {
   ChevronRight,
   ChevronLeft,
   User,
-  Weight
+  Weight,
+  AlertTriangle,
+  Lightbulb,
+  Leaf
 } from 'lucide-react';
 
 import { resolveExerciseDetailFromLabel } from '@/lib/exercises';
@@ -78,6 +81,10 @@ type AiNutritionResult = {
   sodiumMg?: number | null;
   confidence: 'low' | 'medium' | 'high';
   notes: string[];
+  vitaminsAndMinerals?: string[];
+  healthBenefits?: string;
+  warnings?: string;
+  funFact?: string;
 };
 
 type AiNutritionResponse = {
@@ -309,37 +316,58 @@ function usePrefersReducedMotion() {
   return reduced;
 }
 
-function useAnimatedNumber(value: number, opts?: { durationMs?: number }) {
-  const durationMs = opts?.durationMs ?? 450;
+function useAnimatedNumber(value: number) {
   const prefersReducedMotion = usePrefersReducedMotion();
   const [display, setDisplay] = useState<number>(value);
+  
+  const displayRef = useRef(value);
   const rafRef = useRef<number | null>(null);
-  const fromRef = useRef<number>(value);
   const startRef = useRef<number>(0);
+  const fromRef = useRef<number>(value);
+
+  // Keep ref in sync with state for reading inside effect without dep
+  useEffect(() => {
+    displayRef.current = display;
+  }, [display]);
 
   useEffect(() => {
     if (prefersReducedMotion) {
-      // Avoid synchronous setState in effect
       queueMicrotask(() => setDisplay(value));
       return;
     }
     if (!Number.isFinite(value)) return;
+
+    const startValue = displayRef.current;
+    const delta = Math.abs(value - startValue);
+    if (delta === 0) return;
+
+    // Dynamic duration based on magnitude of change
+    // Min 400ms, Max 2000ms
+    const durationMs = Math.min(2000, Math.max(400, delta * 5));
+
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    fromRef.current = display;
+    fromRef.current = startValue;
     startRef.current = performance.now();
 
     const tick = (t: number) => {
-      const p = Math.min(1, (t - startRef.current) / durationMs);
-      const e = 1 - Math.pow(1 - p, 3);
-      const next = fromRef.current + (value - fromRef.current) * e;
+      const elapsed = t - startRef.current;
+      const p = Math.min(1, elapsed / durationMs);
+      const ease = 1 - Math.pow(1 - p, 3); // Cubic ease out
+      
+      const next = fromRef.current + (value - fromRef.current) * ease;
       setDisplay(next);
-      if (p < 1) rafRef.current = requestAnimationFrame(tick);
+
+      if (p < 1) {
+        rafRef.current = requestAnimationFrame(tick);
+      } else {
+        setDisplay(value);
+      }
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [value, durationMs, prefersReducedMotion, display]);
+  }, [value, prefersReducedMotion]);
 
   return display;
 }
@@ -1855,25 +1883,85 @@ function FitnessApp() {
                   )}
 
                   {aiResponse?.results && (
-                     <div className="space-y-3 mt-4">
+                     <div className="space-y-4 mt-4">
                         {aiResponse.results.map((r, i) => (
-                           <div key={i} className="bg-emerald-900/20 rounded-xl p-4 border border-white/5">
-                              <div className="flex justify-between items-start mb-2">
-                                 <span className="font-bold text-white">{r.itemName}</span>
-                                 <span className="text-emerald-400 font-bold">{r.caloriesKcal} kcal</span>
+                           <div key={i} className="bg-[#0a120f]/80 rounded-2xl p-5 border border-white/10 shadow-lg backdrop-blur-md">
+                              {/* Header */}
+                              <div className="flex justify-between items-start mb-4">
+                                 <div>
+                                    <h3 className="text-lg font-black text-white tracking-tight">{r.itemName}</h3>
+                                    <p className="text-xs text-emerald-100/60">{r.assumedServing}</p>
+                                 </div>
+                                 <div className="text-right">
+                                    <div className="text-2xl font-black text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.4)]">
+                                       {r.caloriesKcal}
+                                    </div>
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-100/40">kcal</div>
+                                 </div>
                               </div>
-                              <div className="flex gap-4 text-xs text-emerald-100/40">
-                                 <span>P: {r.proteinG}g</span>
-                                 <span>C: {r.carbsG}g</span>
-                                 <span>F: {r.fatG}g</span>
+
+                              {/* Macros Grid */}
+                              <div className="grid grid-cols-3 gap-2 mb-4">
+                                 <div className="bg-emerald-950/30 rounded-xl p-2 text-center border border-white/5">
+                                    <div className="text-[10px] text-emerald-100/40 uppercase font-bold">Protein</div>
+                                    <div className="text-lg font-bold text-white">{r.proteinG}g</div>
+                                 </div>
+                                 <div className="bg-emerald-950/30 rounded-xl p-2 text-center border border-white/5">
+                                    <div className="text-[10px] text-emerald-100/40 uppercase font-bold">Carbs</div>
+                                    <div className="text-lg font-bold text-white">{r.carbsG}g</div>
+                                 </div>
+                                 <div className="bg-emerald-950/30 rounded-xl p-2 text-center border border-white/5">
+                                    <div className="text-[10px] text-emerald-100/40 uppercase font-bold">Fat</div>
+                                    <div className="text-lg font-bold text-white">{r.fatG}g</div>
+                                 </div>
+                              </div>
+
+                              {/* Detailed Info */}
+                              <div className="space-y-3 border-t border-white/5 pt-3">
+                                 {/* Vitamins */}
+                                 {r.vitaminsAndMinerals && r.vitaminsAndMinerals.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5">
+                                       {r.vitaminsAndMinerals.map((v, idx) => (
+                                          <span key={idx} className="px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-300 text-[10px] font-bold border border-emerald-500/20">
+                                             {v}
+                                          </span>
+                                       ))}
+                                    </div>
+                                 )}
+
+                                 {/* Health Benefits */}
+                                 {r.healthBenefits && (
+                                    <div className="flex gap-2 items-start text-xs text-emerald-100/80 bg-emerald-900/10 p-2 rounded-lg border border-emerald-500/10">
+                                       <Leaf className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                                       <span>{r.healthBenefits}</span>
+                                    </div>
+                                 )}
+
+                                 {/* Warnings */}
+                                 {r.warnings && (
+                                    <div className="flex gap-2 items-start text-xs text-rose-200/80 bg-rose-900/10 p-2 rounded-lg border border-rose-500/10">
+                                       <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                                       <span>{r.warnings}</span>
+                                    </div>
+                                 )}
+
+                                 {/* Fun Fact */}
+                                 {r.funFact && (
+                                    <div className="flex gap-2 items-start text-xs text-amber-100/80 bg-amber-900/10 p-2 rounded-lg border border-amber-500/10">
+                                       <Lightbulb className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                                       <span>{r.funFact}</span>
+                                    </div>
+                                 )}
                               </div>
                            </div>
                         ))}
+                        
                         <button 
                            onClick={saveAiAsMeal}
-                           className="w-full bg-[#E5E4E2] text-[#2D3B2E] font-bold py-3 rounded-xl hover:bg-white transition-colors"
+                           className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3.5 rounded-2xl transition-all shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:shadow-[0_0_25px_rgba(16,185,129,0.5)] active:scale-[0.98] flex items-center justify-center gap-2"
                         >
-                           Save to Log
+                           <Plus className="w-5 h-5" />
+                           Save to Daily Log
                         </button>
                      </div>
                   )}
