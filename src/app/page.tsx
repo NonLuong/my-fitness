@@ -43,6 +43,9 @@ type ProteinEvent = {
   label: string;
   grams: number;
   category: ProteinCategory;
+  calories?: number;
+  carbs?: number;
+  fat?: number;
 };
 
 type WorkoutItemState = {
@@ -380,7 +383,10 @@ function FitnessApp() {
     addProtein({
       label: `AI: ${r.itemName}`,
       grams: Math.round(grams),
-      category: 'whole_food'
+      category: 'whole_food',
+      calories: r.caloriesKcal ?? 0,
+      carbs: r.carbsG ?? 0,
+      fat: r.fatG ?? 0,
     });
   };
 
@@ -466,9 +472,9 @@ function FitnessApp() {
 
   const proteinItems = useMemo(() => (
     [
-      { label: 'Whey Scoop', grams: 25, icon: Dumbbell, desc: 'Supplement', category: 'supplement' as const },
-      { label: 'Chicken Breast', grams: 23, icon: Utensils, desc: 'Whole food', category: 'whole_food' as const },
-      { label: 'Boiled Egg', grams: 7, icon: Flame, desc: 'Snack', category: 'snack' as const },
+      { label: 'Whey Scoop', grams: 25, calories: 120, icon: Dumbbell, desc: 'Supplement', category: 'supplement' as const },
+      { label: 'Chicken Breast', grams: 23, calories: 120, icon: Utensils, desc: 'Whole food', category: 'whole_food' as const },
+      { label: 'Boiled Egg', grams: 7, calories: 75, icon: Flame, desc: 'Snack', category: 'snack' as const },
     ]
   ), []);
 
@@ -870,22 +876,23 @@ function FitnessApp() {
 
   <main className="max-w-6xl mx-auto p-4 md:p-6 space-y-6">
 
-        <div className="rounded-3xl border border-black/5 bg-white/60 p-4 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-white/5">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="text-[11px] font-semibold tracking-wide text-gray-500 dark:text-neutral-400">ใหม่</div>
-              <div className="text-sm font-extrabold text-neutral-900 dark:text-white">โค้ชส่วนตัว (BMI • แคล/วัน • แผน 7 วัน)</div>
-              <div className="mt-0.5 text-xs text-neutral-600 dark:text-neutral-300">กรอกข้อมูลรอบตัวเป็น “นิ้ว” แล้วให้โค้ชช่วยวางแผนให้</div>
+        <div className="flex items-center justify-between rounded-3xl border border-black/5 bg-white/60 p-4 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-white/5">
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400">
+              <Sparkles className="h-5 w-5" />
             </div>
-
-            <a
-              href="/coach"
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-neutral-900 px-4 py-3 text-sm font-extrabold text-white transition hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
-            >
-              <Sparkles className="h-4 w-4" />
-              ไปหน้าโค้ช
-            </a>
+            <div>
+              <div className="text-sm font-extrabold text-neutral-900 dark:text-white">AI Coach</div>
+              <div className="text-xs text-neutral-500 dark:text-neutral-400">วางแผนการกินและออกกำลังกายส่วนตัว</div>
+            </div>
           </div>
+
+          <a
+            href="/coach"
+            className="rounded-2xl bg-neutral-900 px-4 py-2 text-xs font-bold text-white transition hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
+          >
+            Open Coach
+          </a>
         </div>
 
         <MobileTabs
@@ -1333,7 +1340,7 @@ function FitnessApp() {
                 {proteinItems.map((item, idx) => (
                   <button
                     key={idx}
-                    onClick={() => addProtein({ label: item.label, grams: item.grams, category: item.category })}
+                    onClick={() => addProtein({ label: item.label, grams: item.grams, category: item.category, calories: item.calories })}
                     className="flex items-center gap-4 p-3 rounded-xl border border-transparent transition-all group
                       bg-gray-50 hover:bg-gray-100 hover:border-emerald-200 hover:shadow-sm
                       dark:bg-neutral-800/50 dark:hover:bg-neutral-800 dark:hover:border-neutral-700"
@@ -1376,15 +1383,22 @@ function FitnessApp() {
                         <div className="space-y-2">
                           {proteinEvents.slice(0, 5).map(ev => (
                             <div key={ev.id} className="flex items-center justify-between text-sm">
-                              <div className="min-w-0">
+                              <div className="min-w-0 flex-1 pr-2">
                                 <div className="truncate text-gray-800 dark:text-neutral-200">{ev.label}</div>
-                                <div className="text-xs text-gray-500 dark:text-neutral-600">
-                                  {new Date(ev.ts).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}
-                                  <span className="mx-2">•</span>
-                                  {ev.category.replace('_', ' ')}
+                                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-neutral-600">
+                                  <span>{new Date(ev.ts).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</span>
+                                  <span>•</span>
+                                  <span>{ev.category.replace('_', ' ')}</span>
                                 </div>
-                                                           </div>
-                              <div className="font-bold text-emerald-600 dark:text-emerald-500">+{ev.grams}g</div>
+                              </div>
+                              <div className="text-right">
+                                <div className="font-bold text-emerald-600 dark:text-emerald-500">+{ev.grams}g</div>
+                                {ev.calories !== undefined && ev.calories > 0 && (
+                                  <div className="text-[10px] font-medium text-gray-400 dark:text-neutral-500">
+                                    {ev.calories} kcal
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           ))}
                         </div>
