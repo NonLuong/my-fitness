@@ -3,6 +3,9 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeSanitize from 'rehype-sanitize';
 import {
   Dumbbell,
   Flame,
@@ -10,21 +13,23 @@ import {
   Utensils,
   Zap,
   Activity,
-  TrendingUp,
-  ChevronRight,
-  RotateCw,
-  ListPlus,
-  Trash2,
   Sparkles,
   Plus,
+  RotateCw,
+  X,
+  Bot,
+  Loader2,
+  RefreshCw,
+  Send,
+  ChevronRight,
+  ChevronLeft,
+  User,
+  Weight
 } from 'lucide-react';
 
 import { resolveExerciseDetailFromLabel } from '@/lib/exercises';
 
 import { ConfirmDialog } from './_components/ConfirmDialog';
-import { MobileTabs, type MobileTab } from './_components/MobileTabs';
-import { fadeUp, springy, staggerContainer } from './_components/utils/motion';
-import { Header } from './_components/Header';
 import { NutritionSection } from './_components/sections/NutritionSection';
 import type { MealEntry, MealType } from './_components/types/nutrition';
 
@@ -59,7 +64,7 @@ type ScheduleType = {
   [key: number]: DailySchedule;
 };
 
-const MOBILE_TAB_STORAGE_KEY = 'ui_mobileTab_v1';
+const MOBILE_TAB_STORAGE_KEY = 'ui_mobileTab_v2';
 
 type AiNutritionResult = {
   itemName: string;
@@ -82,6 +87,214 @@ type AiNutritionResponse = {
   reasoningSummary?: string;
   error?: string;
 };
+
+// --- Coach Types & Helpers ---
+type Sex = 'male' | 'female';
+type Experience = 'beginner' | 'intermediate' | 'advanced';
+
+type ActivityLevel =
+  | 'sedentary'
+  | 'light'
+  | 'moderate'
+  | 'active'
+  | 'athlete';
+
+type Goal = 'lose_weight' | 'lose_fat' | 'maintain' | 'gain_muscle' | 'gain_weight';
+
+type CoachProfile = {
+  sex: Sex;
+  ageYears?: number;
+  heightCm?: number;
+  weightKg?: number;
+  activity: ActivityLevel;
+
+  // Body measurements in inches
+  waistIn?: number;
+  hipIn?: number;
+  chestIn?: number;
+  neckIn?: number;
+  armIn?: number;
+  thighIn?: number;
+
+  goal: Goal;
+  goalDetail?: string;
+
+  targetWeightKg?: number;
+  targetWeeks?: number;
+
+  experience?: Experience;
+  trainingDaysPerWeek?: number;
+};
+
+type ChatRole = 'user' | 'assistant';
+type CoachChatMessage = {
+  id: string;
+  role: ChatRole;
+  text: string;
+  ts: number;
+};
+
+type CoachApiResponse =
+  | {
+      ok: true;
+      adviceMarkdown: string;
+      summary: {
+        bmi: number;
+        bmiCategoryTh: string;
+        bmrKcal: number;
+        tdeeKcal: number;
+        targetKcal: number;
+        proteinGRange: [number, number];
+        bodyFatPercent?: number | null;
+        suggestedPace?: {
+          kgPerWeek: number;
+          messageTh: string;
+        };
+      };
+      followUpQuestions?: string[];
+    }
+  | { ok: false; error: string };
+
+const ACTIVITY_MULTIPLIERS: Record<ActivityLevel, number> = {
+  sedentary: 1.2,
+  light: 1.375,
+  moderate: 1.55,
+  active: 1.725,
+  athlete: 1.9,
+};
+
+function round(n: number) {
+  return Math.round(n);
+}
+
+function inchesToCm(inches: number) {
+  return inches * 2.54;
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function uid(prefix = 'm') {
+  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+}
+
+function bmiCategoryTh(bmi: number): string {
+  if (!Number.isFinite(bmi) || bmi <= 0) return 'ไม่ทราบ';
+  if (bmi < 18.5) return 'น้ำหนักต่ำกว่าเกณฑ์';
+  if (bmi < 23) return 'สมส่วน';
+  if (bmi < 25) return 'น้ำหนักเกิน';
+  if (bmi < 30) return 'อ้วนระดับ 1';
+  return 'อ้วนระดับ 2';
+}
+
+function calcBmi(heightCm: number, weightKg: number) {
+  const hM = heightCm / 100;
+  if (!Number.isFinite(hM) || hM <= 0) return 0;
+  return weightKg / (hM * hM);
+}
+
+function calcHealthyWeightRangeKg(heightCm: number) {
+  const hM = heightCm / 100;
+  if (!Number.isFinite(hM) || hM <= 0) return [0, 0] as const;
+  return [18.5 * hM * hM, 24.9 * hM * hM] as const;
+}
+
+function calcBmrMifflinStJeor(sex: Sex, ageYears: number, heightCm: number, weightKg: number) {
+  const s = sex === 'male' ? 5 : -161;
+  return 10 * weightKg + 6.25 * heightCm - 5 * ageYears + s;
+}
+
+function calcDailyWeightChangeFromTarget(weightKg: number, targetWeightKg: number, targetWeeks: number) {
+  if (!Number.isFinite(weightKg) || !Number.isFinite(targetWeightKg) || !Number.isFinite(targetWeeks)) return null;
+  if (targetWeeks <= 0) return null;
+  return (targetWeightKg - weightKg) / targetWeeks;
+}
+
+function suggestedSafePaceKgPerWeek(goal: Goal, weightKg: number): { kgPerWeek: number; messageTh: string } {
+  const lossMin = weightKg * 0.0025;
+  const lossMax = weightKg * 0.0075;
+  const gainMin = weightKg * 0.0025;
+  const gainMax = weightKg * 0.005;
+
+  if (goal === 'gain_weight' || goal === 'gain_muscle') {
+    return {
+      kgPerWeek: round(gainMax * 100) / 100,
+      messageTh: `โดยทั่วไป เพิ่มน้ำหนักแบบคุมคุณภาพประมาณ ${gainMin.toFixed(2)}–${gainMax.toFixed(2)} กก./สัปดาห์`
+    };
+  }
+
+  return {
+    kgPerWeek: round(lossMax * 100) / 100,
+    messageTh: `โดยทั่วไป ลดแบบปลอดภัยประมาณ ${lossMin.toFixed(2)}–${lossMax.toFixed(2)} กก./สัปดาห์`
+  };
+}
+
+function kcalAdjustmentForRate(deltaKgPerWeek: number) {
+  return (deltaKgPerWeek * 7700) / 7;
+}
+
+function log10(x: number) {
+  return Math.log(x) / Math.log(10);
+}
+
+function calcBodyFatUsNavy(sex: Sex, heightCm: number, waistIn?: number, neckIn?: number, hipIn?: number) {
+  if (!waistIn || !neckIn) return null;
+  const heightIn = heightCm / 2.54;
+  if (!Number.isFinite(heightIn) || heightIn <= 0) return null;
+
+  const waist = waistIn;
+  const neck = neckIn;
+
+  if (sex === 'male') {
+    const a = waist - neck;
+    if (a <= 0) return null;
+    const bf = 86.010 * log10(a) - 70.041 * log10(heightIn) + 36.76;
+    return clamp(bf, 2, 60);
+  }
+
+  if (!hipIn) return null;
+  const b = waist + hipIn - neck;
+  if (b <= 0) return null;
+  const bf = 163.205 * log10(b) - 97.684 * log10(heightIn) - 78.387;
+  return clamp(bf, 5, 70);
+}
+
+function goalLabelTh(goal: Goal): string {
+  switch (goal) {
+    case 'lose_weight': return 'ลดน้ำหนัก';
+    case 'lose_fat': return 'ลดไขมัน';
+    case 'maintain': return 'คุมหุ่น';
+    case 'gain_muscle': return 'เพิ่มกล้ามเนื้อ';
+    case 'gain_weight': return 'เพิ่มน้ำหนัก';
+  }
+}
+
+function activityLabelTh(a: ActivityLevel): string {
+  switch (a) {
+    case 'sedentary': return 'นั่งทำงานเป็นหลัก';
+    case 'light': return 'ขยับบ้างเล็กน้อย';
+    case 'moderate': return 'ปานกลาง';
+    case 'active': return 'แอคทีฟมาก';
+    case 'athlete': return 'นักกีฬา';
+  }
+}
+
+function goalKcalTarget(tdee: number, goal: Goal): number {
+  switch (goal) {
+    case 'lose_weight':
+    case 'lose_fat': return tdee * 0.85;
+    case 'maintain': return tdee;
+    case 'gain_muscle': return tdee * 1.08;
+    case 'gain_weight': return tdee * 1.12;
+  }
+}
+
+function proteinRangeG(weightKg: number, goal: Goal): [number, number] {
+  const minPerKg = goal === 'gain_muscle' ? 1.8 : goal === 'lose_fat' ? 1.8 : 1.6;
+  const maxPerKg = goal === 'gain_muscle' ? 2.2 : 2.2;
+  return [round(weightKg * minPerKg), round(weightKg * maxPerKg)];
+}
 
 function usePrefersReducedMotion() {
   const [reduced, setReduced] = useState(false);
@@ -106,7 +319,8 @@ function useAnimatedNumber(value: number, opts?: { durationMs?: number }) {
 
   useEffect(() => {
     if (prefersReducedMotion) {
-      setDisplay(value);
+      // Avoid synchronous setState in effect
+      queueMicrotask(() => setDisplay(value));
       return;
     }
     if (!Number.isFinite(value)) return;
@@ -116,7 +330,6 @@ function useAnimatedNumber(value: number, opts?: { durationMs?: number }) {
 
     const tick = (t: number) => {
       const p = Math.min(1, (t - startRef.current) / durationMs);
-      // easeOutCubic
       const e = 1 - Math.pow(1 - p, 3);
       const next = fromRef.current + (value - fromRef.current) * e;
       setDisplay(next);
@@ -126,13 +339,10 @@ function useAnimatedNumber(value: number, opts?: { durationMs?: number }) {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, durationMs, prefersReducedMotion]);
+  }, [value, durationMs, prefersReducedMotion, display]);
 
   return display;
 }
-
-// AI Nutrition panel was removed for now (to keep page.tsx stable).
 
 type DailyLog = {
   protein: number;
@@ -141,7 +351,7 @@ type DailyLog = {
   meals?: MealEntry[];
 };
 
-// --- 2. ข้อมูลตารางฝึก ---
+// --- 2. Schedule Data ---
 const SCHEDULE: ScheduleType = {
   1: { title: "Upper Body Beast", focus: "Strength & Hypertrophy", exercises: ["Bench Press (4x8-10)", "Barbell Row (4x10-12)", "Overhead Press (3x10-12)", "Lat Pulldown (3x12-15)", "Dumbbell Lateral Raise (3x15)", "Cardio: Walk 30 min"] },
   2: { title: "Leg Day Destruction", focus: "Legs Focus", exercises: ["Squat / Hack Squat (4x8-10)", "Leg Press (3x12-15)", "Leg Extension (3x15)", "Leg Curl (3x15)", "Calf Raise (4x20)", "Cardio: Bike 20 min"] },
@@ -164,7 +374,6 @@ function FitnessApp() {
     return String(new Date().getTime());
   };
 
-  // Track mobile mode reactively (so it updates when rotating/resizing)
   const [isMobile, setIsMobile] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return window.innerWidth < 768;
@@ -225,34 +434,298 @@ function FitnessApp() {
     };
   };
 
-  // Lazy init
   const [protein, setProtein] = useState<number>(() => loadInitialData().protein);
   const [proteinEvents, setProteinEvents] = useState<ProteinEvent[]>(() => loadInitialData().proteinEvents);
   const [workoutState, setWorkoutState] = useState<WorkoutState>(() => loadInitialData().workout);
   const [meals, setMeals] = useState<MealEntry[]>(() => loadInitialData().meals);
 
-  // Keep latest meals in a ref to avoid stale closures when scheduling saves.
   const mealsRef = useRef<MealEntry[]>(meals);
   useEffect(() => {
     mealsRef.current = meals;
   }, [meals]);
 
-  const [tipOpen, setTipOpen] = useState<boolean>(false);
-  const [showLog, setShowLog] = useState<boolean>(false);
-
-  const [mobileTab, setMobileTab] = useState<MobileTab>(() => {
-    if (typeof window === 'undefined') return 'workout';
-    const raw = window.localStorage.getItem(MOBILE_TAB_STORAGE_KEY);
-    if (raw === 'workout' || raw === 'nutrition' || raw === 'protein') return raw;
-    return 'workout';
-  });
+  const [activeTab, setActiveTab] = useState<'workout' | 'nutrition' | 'protein' | 'coach'>('workout');
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    window.localStorage.setItem(MOBILE_TAB_STORAGE_KEY, mobileTab);
-  }, [mobileTab]);
+    const saved = window.localStorage.getItem(MOBILE_TAB_STORAGE_KEY);
+    if (saved === 'workout' || saved === 'nutrition' || saved === 'protein' || saved === 'coach') {
+      setActiveTab(saved);
+    }
+  }, []);
 
-  // Workout details modal
+  // --- Coach Logic ---
+  const COACH_STORAGE_KEY = 'coach_chat_v1';
+  const COACH_PROFILE_KEY = 'coach_profile_v1';
+
+  const [coachStep, setCoachStep] = useState(1);
+  const [coachProfile, setCoachProfile] = useState<CoachProfile>({
+    sex: 'male',
+    activity: 'moderate',
+    goal: 'lose_fat',
+    experience: 'beginner',
+    trainingDaysPerWeek: 3,
+  });
+
+  type Draft = {
+    ageYears: string;
+    heightCm: string;
+    weightKg: string;
+    waistIn: string;
+    hipIn: string;
+    chestIn: string;
+    neckIn: string;
+    armIn: string;
+    thighIn: string;
+    targetWeightKg: string;
+    targetWeeks: string;
+    trainingDaysPerWeek: string;
+  };
+
+  const [draftProfile, setDraftProfile] = useState<Draft>({
+    ageYears: '',
+    heightCm: '',
+    weightKg: '',
+    waistIn: '',
+    hipIn: '',
+    chestIn: '',
+    neckIn: '',
+    armIn: '',
+    thighIn: '',
+    targetWeightKg: '',
+    targetWeeks: '',
+    trainingDaysPerWeek: '',
+  });
+
+  const [coachSubmitting, setCoachSubmitting] = useState(false);
+  const [coachApiError, setCoachApiError] = useState<string | null>(null);
+  const [coachSuccessOpen, setCoachSuccessOpen] = useState(false);
+
+  const [coachMessages, setCoachMessages] = useState<CoachChatMessage[]>([]);
+  const [coachDraft, setCoachDraft] = useState('');
+  const [coachFollowUps, setCoachFollowUps] = useState<string[]>([]);
+  const coachMessagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  const parseOptionalNumber = (raw: string, opts?: { min?: number; max?: number }) => {
+    const t = raw.trim().replace(',', '.');
+    if (!t) return undefined;
+    const v = Number(t);
+    if (!Number.isFinite(v)) return undefined;
+    const min = opts?.min ?? -Infinity;
+    const max = opts?.max ?? Infinity;
+    return clamp(v, min, max);
+  };
+
+  const commitNumber = <K extends keyof CoachProfile>(key: K, raw: string, opts?: { min?: number; max?: number }) => {
+    const v = parseOptionalNumber(raw, opts);
+    setCoachProfile((p) => ({ ...p, [key]: v as CoachProfile[K] }));
+  };
+
+  useEffect(() => {
+    const now = Date.now();
+    const EXPIRATION_MS = 24 * 60 * 60 * 1000;
+
+    try {
+      const rawProfile = localStorage.getItem(COACH_PROFILE_KEY);
+      if (rawProfile) {
+        const data = JSON.parse(rawProfile);
+        if (data.timestamp && (now - data.timestamp < EXPIRATION_MS)) {
+          if (data.profile) setCoachProfile(data.profile);
+          if (data.draftProfile) setDraftProfile(data.draftProfile);
+          if (data.profile?.ageYears && data.profile?.heightCm && data.profile?.weightKg && data.profile?.goal) {
+            setCoachStep(5);
+          }
+        } else {
+          localStorage.removeItem(COACH_PROFILE_KEY);
+        }
+      }
+    } catch {}
+
+    try {
+      const rawChat = localStorage.getItem(COACH_STORAGE_KEY);
+      let chatLoaded = false;
+      if (rawChat) {
+        const data = JSON.parse(rawChat);
+        if (data.timestamp && (now - data.timestamp < EXPIRATION_MS)) {
+          if (Array.isArray(data.messages)) {
+            setCoachMessages(data.messages);
+            chatLoaded = true;
+          }
+        } else {
+          localStorage.removeItem(COACH_STORAGE_KEY);
+        }
+      }
+      
+      if (!chatLoaded) {
+        setCoachMessages([
+          {
+            id: uid('a'),
+            role: 'assistant',
+            text: 'สวัสดีครับ 🙂 ผมเป็นโค้ชส่วนตัวของคุณ วันนี้อยากโฟกัสเรื่อง “กิน”, “ซ้อม”, หรือ “ปรับพฤติกรรม” ก่อนดีครับ?',
+            ts: Date.now(),
+          },
+        ]);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COACH_STORAGE_KEY, JSON.stringify({ messages: coachMessages, timestamp: Date.now() }));
+    } catch {}
+  }, [coachMessages]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COACH_PROFILE_KEY, JSON.stringify({ profile: coachProfile, draftProfile, timestamp: Date.now() }));
+    } catch {}
+  }, [coachProfile, draftProfile]);
+
+  useEffect(() => {
+    coachMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [coachMessages.length, coachFollowUps.length, coachSubmitting, activeTab]);
+
+  const coachDerived = useMemo(() => {
+    const heightCm = coachProfile.heightCm ?? 0;
+    const weightKg = coachProfile.weightKg ?? 0;
+    const ageYears = coachProfile.ageYears ?? 0;
+
+    const bmi = heightCm > 0 && weightKg > 0 ? calcBmi(heightCm, weightKg) : 0;
+    const [wMin, wMax] = heightCm > 0 ? calcHealthyWeightRangeKg(heightCm) : ([0, 0] as const);
+    const bmr = ageYears > 0 && heightCm > 0 && weightKg > 0
+      ? calcBmrMifflinStJeor(coachProfile.sex, ageYears, heightCm, weightKg)
+      : 0;
+    const tdee = bmr * ACTIVITY_MULTIPLIERS[coachProfile.activity];
+    let target = goalKcalTarget(tdee, coachProfile.goal);
+
+    const safePace = suggestedSafePaceKgPerWeek(coachProfile.goal, weightKg || 70);
+    const desiredDeltaKgPerWeek =
+      coachProfile.targetWeightKg && coachProfile.targetWeeks
+        ? calcDailyWeightChangeFromTarget(weightKg, coachProfile.targetWeightKg, coachProfile.targetWeeks)
+        : null;
+    const desiredAdj = desiredDeltaKgPerWeek !== null ? kcalAdjustmentForRate(desiredDeltaKgPerWeek) : null;
+
+    if (desiredAdj !== null && Number.isFinite(desiredAdj)) {
+      target = clamp(target + desiredAdj, Math.max(1200, tdee - 1200), tdee + 1200);
+    }
+
+    const waistCm = coachProfile.waistIn ? inchesToCm(coachProfile.waistIn) : null;
+    const hipCm = coachProfile.hipIn ? inchesToCm(coachProfile.hipIn) : null;
+
+    const whr = waistCm && hipCm ? waistCm / hipCm : null;
+    const whtr = waistCm && heightCm ? waistCm / heightCm : null;
+
+    const pRange = proteinRangeG(weightKg || 70, coachProfile.goal);
+
+    const bodyFat = heightCm
+      ? calcBodyFatUsNavy(coachProfile.sex, heightCm, coachProfile.waistIn, coachProfile.neckIn, coachProfile.hipIn)
+      : null;
+
+    return {
+      bmi,
+      bmiCategory: bmiCategoryTh(bmi),
+      healthyWeightKg: [wMin, wMax] as const,
+      bmr,
+      tdee,
+      target,
+      whr,
+      whtr,
+      proteinRange: pRange,
+      bodyFat,
+      safePace,
+      desiredDeltaKgPerWeek,
+    };
+  }, [coachProfile]);
+
+  const canSubmitCoach = useMemo(() => {
+    if (!coachProfile.ageYears || !coachProfile.heightCm || !coachProfile.weightKg) return false;
+    return (
+      Number.isFinite(coachProfile.ageYears) &&
+      coachProfile.ageYears! >= 10 &&
+      coachProfile.ageYears! <= 90 &&
+      Number.isFinite(coachProfile.heightCm) &&
+      coachProfile.heightCm! >= 120 &&
+      coachProfile.heightCm! <= 230 &&
+      Number.isFinite(coachProfile.weightKg) &&
+      coachProfile.weightKg! >= 30 &&
+      coachProfile.weightKg! <= 250
+    );
+  }, [coachProfile]);
+
+  const sendToCoach = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || coachSubmitting) return;
+
+    setCoachSubmitting(true);
+    setCoachApiError(null);
+    setCoachFollowUps([]);
+
+    const userMsg: CoachChatMessage = { id: uid('u'), role: 'user', text: trimmed, ts: Date.now() };
+    setCoachMessages((prev) => [...prev, userMsg]);
+
+    try {
+      const res = await fetch('/api/coach', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          profile: coachProfile,
+          derived: coachDerived,
+          messages: [...coachMessages, userMsg].map((m) => ({ role: m.role, text: m.text })),
+        }),
+      });
+      const data: CoachApiResponse = (await res.json()) as CoachApiResponse;
+      if (!res.ok || !data.ok) {
+        const errorMsg = !data.ok ? data.error : 'เกิดข้อผิดพลาดในการเรียกโค้ช';
+        setCoachApiError(errorMsg);
+        return;
+      }
+      setCoachFollowUps(data.followUpQuestions ?? []);
+      setCoachMessages((prev) => [
+        ...prev,
+        {
+          id: uid('a'),
+          role: 'assistant',
+          text: data.adviceMarkdown,
+          ts: Date.now(),
+        },
+      ]);
+      setCoachSuccessOpen(true);
+      window.setTimeout(() => setCoachSuccessOpen(false), 1600);
+    } catch (e: unknown) {
+      setCoachApiError(e instanceof Error ? e.message : 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ');
+    } finally {
+      setCoachSubmitting(false);
+    }
+  };
+
+  const resetCoachChat = () => {
+    setCoachApiError(null);
+    setCoachFollowUps([]);
+    setCoachDraft('');
+    setCoachMessages([
+      {
+        id: uid('a'),
+        role: 'assistant',
+        text: 'เริ่มใหม่ได้เลยครับ 🙂 เล่าเป้าหมายของคุณ (เช่น “อยากลดไขมันหน้าท้อง”) แล้วบอกเวลาที่สะดวกซ้อมต่อสัปดาห์ด้วยนะครับ',
+        ts: Date.now(),
+      },
+    ]);
+  };
+
+  const sendCoachDraft = async () => {
+    const t = coachDraft;
+    setCoachDraft('');
+    await sendToCoach(t);
+  };
+
+  const nextCoachStep = () => setCoachStep((s) => Math.min(s + 1, 5));
+  const prevCoachStep = () => setCoachStep((s) => Math.max(s - 1, 1));
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(MOBILE_TAB_STORAGE_KEY, activeTab);
+  }, [activeTab]);
+
   const [selectedExerciseLabel, setSelectedExerciseLabel] = useState<string | null>(null);
 
   const selectedExerciseDetail = useMemo(() => {
@@ -260,17 +733,16 @@ function FitnessApp() {
     return resolveExerciseDetailFromLabel(selectedExerciseLabel);
   }, [selectedExerciseLabel]);
 
-  // --- AI Nutrition (Gemini) ---
+  // --- AI Nutrition ---
   const [aiOpen, setAiOpen] = useState<boolean>(false);
   const [aiText, setAiText] = useState<string>('');
   const [aiImage, setAiImage] = useState<File | null>(null);
   const [aiLoading, setAiLoading] = useState<boolean>(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiResponse, setAiResponse] = useState<AiNutritionResponse | null>(null);
-  const [aiMealType, setAiMealType] = useState<MealType>('lunch');
+  const [aiMealType] = useState<MealType>('lunch');
   const lastAiMealProteinCreditRef = useRef<string | null>(null);
 
-  // --- Save success popup ---
   const [saveSuccessOpen, setSaveSuccessOpen] = useState<boolean>(false);
   const saveSuccessTimerRef = useRef<number | null>(null);
 
@@ -284,7 +756,6 @@ function FitnessApp() {
     }, durationMs);
   };
 
-  // Batch localStorage writes
   const pendingSaveRef = useRef<DailyLog | null>(null);
   const saveTimerRef = useRef<number | null>(null);
 
@@ -393,7 +864,6 @@ function FitnessApp() {
   const saveAiAsMeal = () => {
     if (!aiResponse?.results || aiResponse.results.length === 0) return;
 
-    // Credit total protein ONLY when saving the meal, not on analyze.
     const proteinFingerprint = `${aiMealType}::${aiText.trim()}::${aiResponse.results
       .map((r) => `${r.itemName}:${r.proteinG ?? 0}`)
       .join('|')}`;
@@ -428,7 +898,6 @@ function FitnessApp() {
       return nextMeals;
     });
 
-    // UX: Close panel first (feels instant), then clear inputs.
     setAiOpen(false);
     window.setTimeout(() => {
       setAiText('');
@@ -487,7 +956,6 @@ function FitnessApp() {
     scheduleSave(0, [], nextWorkout, []);
   };
 
-  // --- UX helpers ---
   const prefersReducedMotion = usePrefersReducedMotion();
   const proteinAnimated = useAnimatedNumber(protein);
   const kcalAnimated = useAnimatedNumber(mealTotals.caloriesKcal);
@@ -498,356 +966,1004 @@ function FitnessApp() {
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const [mealToDelete, setMealToDelete] = useState<string | null>(null);
 
-  // UX: when switching tabs on mobile, scroll back to the top of main content.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!isMobile) return;
-    // Avoid fighting the user if they're in the middle of a modal.
     if (aiOpen || selectedExerciseLabel) return;
     const behavior: ScrollBehavior = prefersReducedMotion ? 'auto' : 'smooth';
     window.scrollTo({ top: 0, behavior });
-  }, [mobileTab, isMobile, prefersReducedMotion, aiOpen, selectedExerciseLabel]);
+  }, [activeTab, isMobile, prefersReducedMotion, aiOpen, selectedExerciseLabel]);
 
   return (
-    <div className="min-h-screen">
-      {/* Background wash */}
-      <div className="pointer-events-none fixed inset-0 -z-10">
-        <div className="absolute inset-0 bg-linear-to-b from-emerald-50 via-white to-white dark:from-neutral-950 dark:via-neutral-950 dark:to-neutral-950" />
-        <div className="absolute -left-32 -top-32 h-130 w-130 rounded-full bg-emerald-500/12 blur-3xl dark:bg-emerald-400/10" />
-        <div className="absolute -right-40 top-24 h-140 w-140 rounded-full bg-cyan-500/10 blur-3xl dark:bg-cyan-400/8" />
-        <div className="absolute inset-x-0 top-0 h-72 bg-[radial-gradient(ellipse_at_top,rgba(16,185,129,0.12),transparent_55%)] dark:bg-[radial-gradient(ellipse_at_top,rgba(16,185,129,0.10),transparent_60%)]" />
+    <div className="min-h-screen bg-[#050a08] text-white selection:bg-emerald-500/30 font-sans">
+      {/* 3D Ambient Background */}
+      <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
+        <motion.div 
+          animate={{ 
+            scale: [1, 1.2, 1],
+            opacity: [0.3, 0.5, 0.3], 
+            x: [0, 50, 0],
+            y: [0, 30, 0]
+          }}
+          transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
+          className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] rounded-full bg-emerald-900/20 blur-[120px]" 
+        />
+        <motion.div 
+          animate={{ 
+            scale: [1, 1.1, 1],
+            opacity: [0.2, 0.4, 0.2], 
+            x: [0, -30, 0],
+            y: [0, 50, 0]
+          }}
+          transition={{ duration: 15, repeat: Infinity, ease: "easeInOut", delay: 2 }}
+          className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-green-900/20 blur-[120px]" 
+        />
+        <motion.div 
+          animate={{ 
+            opacity: [0.1, 0.3, 0.1], 
+          }}
+          transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+          className="absolute top-[30%] left-[30%] w-[40%] h-[40%] rounded-full bg-emerald-500/5 blur-[100px]" 
+        />
       </div>
 
-      {/* AI Nutrition — compact card */}
-      <div className="fixed bottom-5 right-5 z-40">
-        <button
-          onClick={() => setAiOpen((v) => !v)}
-          className="group flex items-center gap-2 rounded-2xl border border-white/10 bg-white/80 px-4 py-3 text-sm font-semibold shadow-lg backdrop-blur-xl transition hover:bg-white dark:bg-neutral-900/70 dark:hover:bg-neutral-900"
-          aria-label="AI Nutrition"
-        >
-          <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
-          <span className="hidden sm:inline">AI Nutrition</span>
-        </button>
+      {/* Header (Mobile Only) */}
+      <header className="md:hidden fixed top-0 inset-x-0 z-30 border-b border-white/5 bg-[#050a08]/80 backdrop-blur-xl">
+        <div className="max-w-md mx-auto px-4 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-linear-to-br from-emerald-500 to-emerald-700 flex items-center justify-center shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+              <Activity className="w-5 h-5 text-white" />
+            </div>
+            <span className="font-bold text-lg tracking-tight text-white">FitSync</span>
+          </div>
+          <div className="flex items-center gap-3">
+             <button 
+                onClick={() => setConfirmResetOpen(true)}
+                className="p-2 rounded-full hover:bg-white/5 text-emerald-100/60 hover:text-white transition-colors"
+             >
+                <RotateCw className="w-5 h-5" />
+             </button>
+             <div className="w-8 h-8 rounded-full bg-neutral-900 border border-white/10 overflow-hidden">
+                <div className="w-full h-full bg-linear-to-tr from-emerald-900 to-neutral-800" />
+             </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Layout */}
+      <div className="max-w-7xl mx-auto p-4 md:p-8 pt-20 md:pt-8 grid grid-cols-1 md:grid-cols-12 gap-8">
+
+        {/* Desktop Navigation (Left Sidebar) */}
+        <nav className="hidden md:flex md:col-span-3 lg:col-span-2 flex-col gap-6 sticky top-8 h-fit">
+          <div className="flex items-center gap-3 px-2 mb-4">
+            <div className="w-10 h-10 rounded-xl bg-linear-to-br from-emerald-500 to-emerald-700 flex items-center justify-center shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+              <Activity className="w-6 h-6 text-white" />
+            </div>
+            <span className="font-bold text-xl tracking-tight text-white">FitSync</span>
+          </div>
+
+          <div className="space-y-2">
+            {[
+              { id: 'workout', icon: Dumbbell, label: 'Workout' },
+              { id: 'nutrition', icon: Utensils, label: 'Nutrition' },
+              { id: 'protein', icon: Zap, label: 'Quick Add' },
+            ].map((tab) => {
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as 'workout' | 'nutrition' | 'protein')}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-200 ${
+                    isActive 
+                      ? 'bg-emerald-500/10 text-emerald-400 font-bold shadow-[0_0_15px_rgba(16,185,129,0.1)] border border-emerald-500/20' 
+                      : 'text-emerald-100/60 hover:bg-white/5 hover:text-white'
+                  }`}
+                >
+                  <tab.icon className={`w-5 h-5 ${isActive ? 'text-emerald-400 drop-shadow-[0_0_5px_rgba(16,185,129,0.5)]' : ''}`} />
+                  <span>{tab.label}</span>
+                  {isActive && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_5px_#34d399]" />}
+                </button>
+              );
+            })}
+
+            <button
+              onClick={() => setActiveTab('coach')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-200 ${
+                activeTab === 'coach'
+                  ? 'bg-emerald-500/10 text-emerald-400 font-bold shadow-[0_0_15px_rgba(16,185,129,0.1)] border border-emerald-500/20'
+                  : 'text-emerald-100/60 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <Bot className={`w-5 h-5 ${activeTab === 'coach' ? 'text-emerald-400 drop-shadow-[0_0_5px_rgba(16,185,129,0.5)]' : ''}`} />
+              <span>AI Coach</span>
+              {activeTab === 'coach' && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_5px_#34d399]" />}
+            </button>
+          </div>
+
+          <div className="pt-6 mt-auto border-t border-white/5 space-y-3">
+             <button 
+                onClick={() => setConfirmResetOpen(true)}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-emerald-100/60 hover:bg-red-500/10 hover:text-red-400 transition-colors"
+             >
+                <RotateCw className="w-5 h-5" />
+                <span className="font-medium">Reset Day</span>
+             </button>
+          </div>
+        </nav>
+
+        {/* Center Content (Main Feed) */}
+        <main className="md:col-span-5 lg:col-span-7 space-y-6 order-2 md:order-1 min-w-0">
+          {/* Tab Content */}
+          <AnimatePresence mode="wait">
+
+          {activeTab === 'workout' && (
+            <motion.div
+              key="workout"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              transition={{ duration: 0.2 }}
+              className="space-y-4"
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold text-white">Today&apos;s Plan</h2>
+                <span className="text-xs font-medium text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded-lg border border-emerald-400/20 shadow-[0_0_10px_rgba(52,211,153,0.1)]">
+                  {todaySchedule.title}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {todaySchedule.exercises.map((ex, i) => {
+                   const item = workoutState[ex] ?? { target: parseWorkoutTarget(ex), count: 0 };
+                   const done = item.count >= item.target;
+                   
+                   return (
+                    <motion.div
+                      key={ex}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.05 }}
+                      onClick={() => setSelectedExerciseLabel(ex)}
+                      className={`group relative overflow-hidden rounded-2xl border p-4 transition-all active:scale-[0.98] h-full backdrop-blur-md
+                        ${done 
+                          ? 'bg-emerald-950/40 border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.1)]' 
+                          : 'bg-[#0a120f]/60 border-white/5 hover:border-white/10 hover:bg-[#0a120f]/80'
+                        }`}
+                    >
+                      <div className="flex items-center gap-4 h-full">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all shrink-0
+                          ${done 
+                            ? 'bg-emerald-500 border-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)]' 
+                            : 'border-white/10 bg-white/5 text-emerald-100/40'
+                          }`}>
+                          {done ? <CheckCircle2 className="w-5 h-5" /> : <span className="text-sm font-bold">{i + 1}</span>}
+                        </div>
+                        
+                        <div className="flex-1 min-w-0">
+                          <h3 className={`font-bold text-base truncate transition-colors ${done ? 'text-emerald-400' : 'text-white'}`}>
+                            {ex}
+                          </h3>
+                          <div className="flex items-center gap-2 mt-1">
+                            <div className="h-1.5 flex-1 bg-neutral-800 rounded-full overflow-hidden">
+                              <motion.div 
+                                className="h-full bg-emerald-500 shadow-[0_0_10px_#10b981]"
+                                initial={{ width: 0 }}
+                                animate={{ width: `${(item.count / item.target) * 100}%` }}
+                              />
+                            </div>
+                            <span className="text-xs font-medium text-emerald-100/40 whitespace-nowrap">{item.count}/{item.target}</span>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={(e) => { e.stopPropagation(); incrementExercise(ex); }}
+                          className="w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors border border-white/5 shrink-0"
+                        >
+                          <Plus className="w-5 h-5" />
+                        </button>
+                      </div>
+                    </motion.div>
+                   );
+                })}
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'nutrition' && (
+            <motion.div
+              key="nutrition"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.2 }}
+              className="space-y-6"
+            >
+               <NutritionSection
+                  mobileVisible={true}
+                  prefersReducedMotion={prefersReducedMotion}
+                  meals={meals}
+                  kcalAnimated={kcalAnimated}
+                  pAnimated={pAnimated}
+                  cAnimated={cAnimated}
+                  fAnimated={fAnimated}
+                  onOpenAi={() => setAiOpen(true)}
+                  onRequestDeleteMeal={(id) => setMealToDelete(id)}
+                />
+            </motion.div>
+          )}
+
+          {activeTab === 'protein' && (
+             <motion.div
+              key="protein"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.2 }}
+              className="space-y-4"
+             >
+                <h2 className="text-xl font-bold text-white">Quick Add</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {proteinItems.map((item, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => addProtein({ label: item.label, grams: item.grams, category: item.category, calories: item.calories })}
+                      className="flex items-center gap-4 p-4 rounded-2xl border border-white/5 bg-[#0a120f]/60 hover:bg-[#0a120f]/80 transition-all group h-full backdrop-blur-md hover:border-emerald-500/20"
+                    >
+                      <div className="w-12 h-12 rounded-2xl bg-emerald-950/30 flex items-center justify-center text-emerald-100/60 group-hover:text-emerald-400 group-hover:scale-110 transition-all shadow-inner shadow-black/20 border border-white/5 group-hover:border-emerald-500/20 group-hover:shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+                        <item.icon className="w-6 h-6" />
+                      </div>
+                      <div className="flex-1 text-left">
+                        <div className="font-bold text-white">{item.label}</div>
+                        <div className="text-xs text-emerald-100/40">{item.desc}</div>
+                      </div>
+                      <div className="text-emerald-400 font-bold text-lg drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">+{item.grams}g</div>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="pt-4 border-t border-white/10">
+                   <h3 className="text-sm font-bold text-emerald-100/40 mb-3">Recent Log</h3>
+                   <div className="space-y-2">
+                      {proteinEvents.slice(0, 5).map(ev => (
+                         <div key={ev.id} className="flex items-center justify-between p-3 rounded-xl bg-[#0a120f]/40 border border-white/5 hover:border-emerald-500/20 transition-colors">
+                            <span className="text-sm text-emerald-100/80">{ev.label}</span>
+                            <span className="text-sm font-bold text-emerald-400">+{ev.grams}g</span>
+                         </div>
+                      ))}
+                      {proteinEvents.length === 0 && <div className="text-sm text-emerald-100/40 text-center py-4">No entries yet</div>}
+                   </div>
+                </div>
+             </motion.div>
+          )}
+
+          {activeTab === 'coach' && (
+            <motion.div
+              key="coach"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.2 }}
+              className="space-y-6"
+            >
+              {/* Step 1: Basic Info */}
+              {coachStep === 1 && (
+                <div className="space-y-6">
+                  <div className="text-center">
+                    <h1 className="text-2xl font-bold text-white">Let&apos;s Start</h1>
+                    <p className="mt-2 text-sm text-emerald-100/60">Basic info for your plan</p>
+                  </div>
+
+                  <div className="rounded-3xl border border-white/10 bg-[#0a120f]/60 p-6 backdrop-blur-md">
+                    <div className="space-y-6">
+                      <div className="space-y-3">
+                        <label className="text-sm font-bold text-white">Sex</label>
+                        <div className="grid grid-cols-2 gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setCoachProfile((p) => ({ ...p, sex: 'male' }))}
+                            className={`flex flex-col items-center justify-center gap-2 rounded-2xl border-2 py-6 transition ${
+                              coachProfile.sex === 'male'
+                                ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400'
+                                : 'border-transparent bg-white/5 text-emerald-100/40 hover:bg-white/10'
+                            }`}
+                          >
+                            <User className="h-8 w-8" />
+                            <span className="font-bold">Male</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCoachProfile((p) => ({ ...p, sex: 'female' }))}
+                            className={`flex flex-col items-center justify-center gap-2 rounded-2xl border-2 py-6 transition ${
+                              coachProfile.sex === 'female'
+                                ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400'
+                                : 'border-transparent bg-white/5 text-emerald-100/40 hover:bg-white/10'
+                            }`}
+                          >
+                            <User className="h-8 w-8" />
+                            <span className="font-bold">Female</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                        <label className="space-y-2">
+                          <div className="text-sm font-bold text-white">Age (Years)</div>
+                          <input
+                            inputMode="numeric"
+                            placeholder="25"
+                            value={draftProfile.ageYears}
+                            onChange={(e) => setDraftProfile((d) => ({ ...d, ageYears: e.target.value }))}
+                            onBlur={() => commitNumber('ageYears', draftProfile.ageYears, { min: 10, max: 90 })}
+                            className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-lg font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          />
+                        </label>
+                        <label className="space-y-2">
+                          <div className="text-sm font-bold text-white">Height (cm)</div>
+                          <input
+                            inputMode="numeric"
+                            placeholder="170"
+                            value={draftProfile.heightCm}
+                            onChange={(e) => setDraftProfile((d) => ({ ...d, heightCm: e.target.value }))}
+                            onBlur={() => commitNumber('heightCm', draftProfile.heightCm, { min: 120, max: 230 })}
+                            className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-lg font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          />
+                        </label>
+                        <label className="space-y-2">
+                          <div className="text-sm font-bold text-white">Weight (kg)</div>
+                          <input
+                            inputMode="numeric"
+                            placeholder="70"
+                            value={draftProfile.weightKg}
+                            onChange={(e) => setDraftProfile((d) => ({ ...d, weightKg: e.target.value }))}
+                            onBlur={() => commitNumber('weightKg', draftProfile.weightKg, { min: 30, max: 250 })}
+                            className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-lg font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={nextCoachStep}
+                    disabled={!canSubmitCoach}
+                    className={`flex w-full items-center justify-center gap-2 rounded-2xl py-4 text-base font-bold transition ${
+                      canSubmitCoach
+                        ? 'bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] hover:bg-emerald-600'
+                        : 'cursor-not-allowed bg-white/5 text-emerald-100/20'
+                    }`}
+                  >
+                    Next <ChevronRight className="h-5 w-5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Step 2: Activity */}
+              {coachStep === 2 && (
+                <div className="space-y-6">
+                  <div className="text-center">
+                    <h1 className="text-2xl font-bold text-white">Activity Level</h1>
+                    <p className="mt-2 text-sm text-emerald-100/60">Helps calculate your metabolism</p>
+                  </div>
+
+                  <div className="space-y-4">
+                    {Object.keys(ACTIVITY_MULTIPLIERS).map((k) => (
+                      <button
+                        key={k}
+                        onClick={() => setCoachProfile((p) => ({ ...p, activity: k as ActivityLevel }))}
+                        className={`flex w-full items-center gap-4 rounded-2xl border p-4 text-left transition ${
+                          coachProfile.activity === k
+                            ? 'border-emerald-500 bg-emerald-500/10'
+                            : 'border-white/5 bg-[#0a120f]/60 hover:bg-white/5'
+                        }`}
+                      >
+                        <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${
+                          coachProfile.activity === k ? 'bg-emerald-500 text-white' : 'bg-white/5 text-emerald-100/40'
+                        }`}>
+                          <Activity className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <div className={`font-bold ${coachProfile.activity === k ? "text-emerald-400" : "text-white"}`}>
+                            {k === 'sedentary' && 'Sedentary'}
+                            {k === 'light' && 'Lightly Active'}
+                            {k === 'moderate' && 'Moderately Active'}
+                            {k === 'active' && 'Very Active'}
+                            {k === 'athlete' && 'Athlete'}
+                          </div>
+                          <div className="text-xs text-emerald-100/40">{activityLabelTh(k as ActivityLevel)}</div>
+                        </div>
+                        {coachProfile.activity === k && <CheckCircle2 className="ml-auto h-5 w-5 text-emerald-500" />}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={prevCoachStep}
+                      className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-[#0a120f]/60 text-white transition hover:bg-white/5"
+                    >
+                      <ChevronLeft className="h-6 w-6" />
+                    </button>
+                    <button
+                      onClick={nextCoachStep}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-500 text-base font-bold text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] transition hover:bg-emerald-600"
+                    >
+                      Next <ChevronRight className="h-5 w-5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 3: Body Stats */}
+              {coachStep === 3 && (
+                <div className="space-y-6">
+                  <div className="text-center">
+                    <h1 className="text-2xl font-bold text-white">Body Stats</h1>
+                    <p className="mt-2 text-sm text-emerald-100/60">Optional, for body fat calculation</p>
+                  </div>
+
+                  <div className="rounded-3xl border border-white/10 bg-[#0a120f]/60 p-6 backdrop-blur-md">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <label className="space-y-2">
+                        <div className="text-sm font-bold text-white">Waist (in)</div>
+                        <input
+                          inputMode="decimal"
+                          placeholder="32"
+                          value={draftProfile.waistIn}
+                          onChange={(e) => setDraftProfile((d) => ({ ...d, waistIn: e.target.value }))}
+                          onBlur={() => commitNumber('waistIn', draftProfile.waistIn, { min: 1, max: 90 })}
+                          className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </label>
+                      <label className="space-y-2">
+                        <div className="text-sm font-bold text-white">Hip (in)</div>
+                        <input
+                          inputMode="decimal"
+                          placeholder="38"
+                          value={draftProfile.hipIn}
+                          onChange={(e) => setDraftProfile((d) => ({ ...d, hipIn: e.target.value }))}
+                          onBlur={() => commitNumber('hipIn', draftProfile.hipIn, { min: 1, max: 120 })}
+                          className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </label>
+                      <label className="space-y-2">
+                        <div className="text-sm font-bold text-white">Chest (in)</div>
+                        <input
+                          inputMode="decimal"
+                          placeholder="40"
+                          value={draftProfile.chestIn}
+                          onChange={(e) => setDraftProfile((d) => ({ ...d, chestIn: e.target.value }))}
+                          onBlur={() => commitNumber('chestIn', draftProfile.chestIn, { min: 1, max: 120 })}
+                          className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </label>
+                      <label className="space-y-2">
+                        <div className="text-sm font-bold text-white">Neck (in)</div>
+                        <input
+                          inputMode="decimal"
+                          placeholder="15"
+                          value={draftProfile.neckIn}
+                          onChange={(e) => setDraftProfile((d) => ({ ...d, neckIn: e.target.value }))}
+                          onBlur={() => commitNumber('neckIn', draftProfile.neckIn, { min: 1, max: 40 })}
+                          className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={prevCoachStep}
+                      className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-[#0a120f]/60 text-white transition hover:bg-white/5"
+                    >
+                      <ChevronLeft className="h-6 w-6" />
+                    </button>
+                    <button
+                      onClick={nextCoachStep}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-500 text-base font-bold text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] transition hover:bg-emerald-600"
+                    >
+                      Next <ChevronRight className="h-5 w-5" />
+                    </button>
+                  </div>
+                  <button onClick={nextCoachStep} className="mx-auto block text-xs font-bold text-emerald-100/40 hover:text-white">
+                    Skip
+                  </button>
+                </div>
+              )}
+
+              {/* Step 4: Goal */}
+              {coachStep === 4 && (
+                <div className="space-y-6">
+                  <div className="text-center">
+                    <h1 className="text-2xl font-bold text-white">Your Goal</h1>
+                    <p className="mt-2 text-sm text-emerald-100/60">We&apos;ll help you get there</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    {(['lose_weight', 'lose_fat', 'maintain', 'gain_muscle', 'gain_weight'] as const).map((g) => (
+                      <button
+                        key={g}
+                        onClick={() => setCoachProfile((p) => ({ ...p, goal: g }))}
+                        className={`flex flex-col items-center justify-center gap-2 rounded-2xl border p-4 transition ${
+                          coachProfile.goal === g
+                            ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400'
+                            : 'border-white/5 bg-[#0a120f]/60 text-emerald-100/60 hover:bg-white/5 hover:text-white'
+                        }`}
+                      >
+                        {g === 'lose_weight' && <Weight className="h-6 w-6" />}
+                        {g === 'lose_fat' && <Flame className="h-6 w-6" />}
+                        {g === 'maintain' && <Activity className="h-6 w-6" />}
+                        {g === 'gain_muscle' && <Dumbbell className="h-6 w-6" />}
+                        {g === 'gain_weight' && <Plus className="h-6 w-6" />}
+                        <span className="text-xs font-bold">{goalLabelTh(g)}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="rounded-3xl border border-white/10 bg-[#0a120f]/60 p-6 backdrop-blur-md">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <label className="space-y-2">
+                        <div className="text-sm font-bold text-white">Target Weight (kg)</div>
+                        <input
+                          inputMode="decimal"
+                          placeholder="Optional"
+                          value={draftProfile.targetWeightKg}
+                          onChange={(e) => setDraftProfile((d) => ({ ...d, targetWeightKg: e.target.value }))}
+                          onBlur={() => commitNumber('targetWeightKg', draftProfile.targetWeightKg, { min: 30, max: 300 })}
+                          className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </label>
+                      <label className="space-y-2">
+                        <div className="text-sm font-bold text-white">Duration (Weeks)</div>
+                        <input
+                          inputMode="numeric"
+                          placeholder="8"
+                          value={draftProfile.targetWeeks}
+                          onChange={(e) => setDraftProfile((d) => ({ ...d, targetWeeks: e.target.value }))}
+                          onBlur={() => commitNumber('targetWeeks', draftProfile.targetWeeks, { min: 1, max: 52 })}
+                          className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </label>
+                      <label className="space-y-2">
+                        <div className="text-sm font-bold text-white">Training Days/Week</div>
+                        <input
+                          inputMode="numeric"
+                          placeholder="3"
+                          value={draftProfile.trainingDaysPerWeek}
+                          onChange={(e) => setDraftProfile((d) => ({ ...d, trainingDaysPerWeek: e.target.value }))}
+                          onBlur={() => commitNumber('trainingDaysPerWeek', draftProfile.trainingDaysPerWeek, { min: 0, max: 7 })}
+                          className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={prevCoachStep}
+                      className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-[#0a120f]/60 text-white transition hover:bg-white/5"
+                    >
+                      <ChevronLeft className="h-6 w-6" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (coachSubmitting) return;
+                        nextCoachStep();
+                        void sendToCoach('ช่วยสรุปเป้าหมายและวางแผนเริ่มต้น 7 วันให้หน่อย');
+                      }}
+                      disabled={coachSubmitting}
+                      className={`flex flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-500 text-base font-bold text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] transition hover:bg-emerald-600 ${
+                        coachSubmitting && 'cursor-not-allowed opacity-70'
+                      }`}
+                    >
+                      {coachSubmitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}
+                      Create Plan
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 5: Dashboard & Chat */}
+              {coachStep === 5 && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h1 className="text-2xl font-bold text-white">Coach Dashboard</h1>
+                      <p className="text-sm text-emerald-100/60">Your personalized plan</p>
+                    </div>
+                    <button
+                      onClick={() => setCoachStep(1)}
+                      className="rounded-full bg-white/5 px-4 py-2 text-xs font-bold text-emerald-100/60 transition hover:bg-white/10 hover:text-white"
+                    >
+                      Edit Profile
+                    </button>
+                  </div>
+
+                  {/* Stats Grid */}
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div className="rounded-3xl bg-[#0a120f]/60 border border-white/5 p-4 backdrop-blur-md">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-100/40">BMI</div>
+                      <div className="mt-1 text-2xl font-extrabold text-white">{coachDerived.bmi.toFixed(1)}</div>
+                      <div className="text-xs font-medium text-emerald-400">{coachDerived.bmiCategory}</div>
+                    </div>
+                    <div className="rounded-3xl bg-[#0a120f]/60 border border-white/5 p-4 backdrop-blur-md">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-100/40">TDEE</div>
+                      <div className="mt-1 text-2xl font-extrabold text-white">{round(coachDerived.tdee)}</div>
+                      <div className="text-xs text-emerald-100/40">kcal/day</div>
+                    </div>
+                    <div className="rounded-3xl bg-emerald-500 p-4 text-white shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-100">Target</div>
+                      <div className="mt-1 text-2xl font-extrabold">{round(coachDerived.target)}</div>
+                      <div className="text-xs text-emerald-100">kcal/day</div>
+                    </div>
+                    <div className="rounded-3xl bg-[#0a120f]/60 border border-white/5 p-4 backdrop-blur-md">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-100/40">Protein</div>
+                      <div className="mt-1 text-xl font-extrabold text-white">{coachDerived.proteinRange[0]}-{coachDerived.proteinRange[1]}</div>
+                      <div className="text-xs text-emerald-100/40">g/day</div>
+                    </div>
+                  </div>
+
+                  {/* Chat Interface */}
+                  <div className="flex h-[65vh] sm:h-150 flex-col overflow-hidden rounded-4xl border border-white/10 bg-[#0a120f]/60 shadow-2xl backdrop-blur-md">
+                    <div className="border-b border-white/5 bg-emerald-950/30 px-6 py-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="grid h-10 w-10 place-items-center rounded-full bg-emerald-500/20 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.2)]">
+                            <Sparkles className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <div className="text-sm font-bold text-white">AI Coach</div>
+                            <div className="text-xs text-emerald-100/40">Online 24/7</div>
+                          </div>
+                        </div>
+                        <button
+                          onClick={resetCoachChat}
+                          className="rounded-full p-2 text-emerald-100/40 hover:bg-white/5 hover:text-white transition-colors"
+                        >
+                          <RefreshCw className="h-5 w-5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-black/20">
+                      {coachMessages.map((m) => (
+                        <div
+                          key={m.id}
+                          className={`flex w-full ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                        >
+                          <div
+                            className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
+                              m.role === 'user'
+                                ? 'bg-emerald-600 text-white shadow-[0_0_10px_rgba(5,150,105,0.3)]'
+                                : 'bg-[#1a2e26] text-emerald-50 border border-white/5'
+                            }`}
+                          >
+                            {m.role === 'assistant' ? (
+                              <div className="coach-markdown prose prose-sm prose-invert max-w-none">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+                                  {m.text}
+                                </ReactMarkdown>
+                              </div>
+                            ) : (
+                              <div className="whitespace-pre-wrap">{m.text}</div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      {coachSubmitting && (
+                        <div className="flex justify-start">
+                          <div className="flex items-center gap-2 rounded-2xl bg-[#1a2e26] px-4 py-3 text-sm text-emerald-100/60 border border-white/5">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Typing...
+                          </div>
+                        </div>
+                      )}
+                      <div ref={coachMessagesEndRef} />
+                    </div>
+
+                    <div className="border-t border-white/5 bg-emerald-950/30 p-4">
+                      {coachApiError && (
+                        <div className="mb-2 text-xs font-medium text-rose-400 text-center">
+                          {coachApiError}
+                        </div>
+                      )}
+                      {coachFollowUps.length > 0 && (
+                        <div className="mb-3 flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                          {coachFollowUps.map((q) => (
+                            <button
+                              key={q}
+                              onClick={() => void sendToCoach(q)}
+                              className="whitespace-nowrap rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs font-bold text-emerald-400 transition hover:bg-emerald-500/20"
+                            >
+                              {q}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex gap-2">
+                        <input
+                          value={coachDraft}
+                          onChange={(e) => setCoachDraft(e.target.value)}
+                          placeholder="Ask your coach..."
+                          className="flex-1 rounded-full border border-white/10 bg-black/40 px-4 py-3 text-sm font-medium text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 placeholder:text-emerald-100/20"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              void sendCoachDraft();
+                            }
+                          }}
+                        />
+                        <button
+                          onClick={() => void sendCoachDraft()}
+                          disabled={!coachDraft.trim() || coachSubmitting}
+                          className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500 text-white transition hover:bg-emerald-600 disabled:opacity-50 shadow-[0_0_10px_rgba(16,185,129,0.4)]"
+                        >
+                          <Send className="h-5 w-5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        </main>
+
+        {/* Right Column (Status Card) */}
+        <aside className="md:col-span-4 lg:col-span-3 space-y-6 order-1 md:order-2">
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="overflow-hidden rounded-4xl bg-[#0a120f]/80 border border-white/5 p-6 shadow-2xl sticky top-8 backdrop-blur-md"
+          >
+            <div className="absolute inset-0 bg-linear-to-br from-emerald-500/10 to-transparent" />
+            
+            <div className="relative z-10 flex flex-col items-center text-center">
+              <div className="mb-2 text-xs font-bold uppercase tracking-widest text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">Daily Goal</div>
+              <div className="relative w-40 h-40 mb-4 flex items-center justify-center">
+                 {/* Progress Ring */}
+                 <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="6" className="text-emerald-950" />
+                    <motion.circle 
+                      cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="6" 
+                      className="text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.6)]"
+                      strokeLinecap="round"
+                      initial={{ pathLength: 0 }}
+                      animate={{ pathLength: progress / 100 }}
+                      transition={{ duration: 1.5, ease: "easeOut" }}
+                    />
+                 </svg>
+                 <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-4xl font-black tracking-tighter text-white drop-shadow-lg">{Math.round(proteinAnimated)}</span>
+                    <span className="text-xs font-medium text-emerald-100/40">/ 180g Protein</span>
+                 </div>
+              </div>
+              
+              <div className="grid grid-cols-3 gap-4 w-full border-t border-white/5 pt-4">
+                 <div>
+                    <div className="text-[10px] text-emerald-100/40 uppercase tracking-wider">Kcal</div>
+                    <div className="text-lg font-bold text-white">{Math.round(kcalAnimated)}</div>
+                 </div>
+                 <div>
+                    <div className="text-[10px] text-emerald-100/40 uppercase tracking-wider">Carbs</div>
+                    <div className="text-lg font-bold text-white">{Math.round(cAnimated)}</div>
+                 </div>
+                 <div>
+                    <div className="text-[10px] text-emerald-100/40 uppercase tracking-wider">Fat</div>
+                    <div className="text-lg font-bold text-white">{Math.round(fAnimated)}</div>
+                 </div>
+              </div>
+            </div>
+          </motion.div>
+        </aside>
+
       </div>
 
-      <AnimatePresence initial={false}>
+      {/* Floating Bottom Navigation (Mobile Only) */}
+      <div className="md:hidden fixed bottom-6 inset-x-0 z-40 flex justify-center">
+        <div className="flex items-center gap-1 p-1.5 rounded-full bg-[#0a120f]/90 border border-white/10 backdrop-blur-xl shadow-2xl shadow-black/50">
+          {[
+            { id: 'workout', icon: Dumbbell, label: 'Workout' },
+            { id: 'nutrition', icon: Utensils, label: 'Food' },
+            { id: 'protein', icon: Zap, label: 'Quick' },
+            { id: 'coach', icon: Bot, label: 'Coach' },
+          ].map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as 'workout' | 'nutrition' | 'protein')}
+                className={`relative px-6 py-3 rounded-full flex items-center gap-2 transition-all duration-300 ${
+                  isActive ? 'text-white' : 'text-emerald-100/40 hover:text-white'
+                }`}
+              >
+                {isActive && (
+                  <motion.div
+                    layoutId="activeTab"
+                    className="absolute inset-0 bg-emerald-500 rounded-full shadow-[0_0_10px_#10b981]"
+                    transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                  />
+                )}
+                <tab.icon className={`w-5 h-5 relative z-10 ${isActive ? 'scale-110 drop-shadow-md' : ''}`} />
+                {isActive && (
+                  <motion.span 
+                    initial={{ opacity: 0, width: 0 }} 
+                    animate={{ opacity: 1, width: 'auto' }} 
+                    className="text-sm font-bold relative z-10 whitespace-nowrap overflow-hidden"
+                  >
+                    {tab.label}
+                  </motion.span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* AI Nutrition Modal (Reused Logic) */}
+      <AnimatePresence>
         {aiOpen && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.18, ease: 'easeOut' }}
-            className="fixed inset-0 z-40"
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
             onClick={() => setAiOpen(false)}
-            aria-hidden
           >
-            <div className="absolute inset-0 bg-black/10 dark:bg-black/40" />
-
             <motion.div
-              initial={{ opacity: 0, y: 12, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 12, scale: 0.98 }}
-              transition={{ duration: 0.22, ease: 'easeOut' }}
-              className="fixed bottom-20 right-5 z-40 w-[min(92vw,420px)] max-h-[min(78vh,720px)] overflow-hidden rounded-3xl border border-white/10 bg-white/85 shadow-2xl backdrop-blur-xl dark:bg-neutral-950/80"
-              onClick={(e) => e.stopPropagation()}
-              role="dialog"
-              aria-label="AI Nutrition"
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              onClick={e => e.stopPropagation()}
+              className="w-full max-w-md bg-[#0a120f] border border-white/10 rounded-3xl overflow-hidden shadow-2xl"
             >
-              <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-black/5 bg-white/85 px-5 py-4 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-950/80">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-5 w-5 text-emerald-600 dark:text-emerald-300" />
-                  <div>
-                    <div className="text-sm font-bold">AI Nutrition</div>
-                    <div className="text-[11px] text-neutral-500 dark:text-neutral-400">estimate • text + photo</div>
+               <div className="p-4 border-b border-white/10 flex justify-between items-center bg-emerald-950/30">
+                  <div className="flex items-center gap-2">
+                     <Sparkles className="w-5 h-5 text-emerald-400" />
+                     <span className="font-bold text-white">AI Nutrition</span>
                   </div>
-                </div>
-                <button
-                  onClick={() => setAiOpen(false)}
-                  className="rounded-xl px-3 py-2 text-xs font-semibold text-neutral-600 hover:bg-black/5 dark:text-neutral-300 dark:hover:bg-white/5"
-                >
-                  Close
-                </button>
-              </div>
-
-              <div className="max-h-[calc(min(78vh,720px)-64px)] overflow-y-auto overscroll-contain p-5">
-                <div className="space-y-3">
-                <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-300">What did you eat?</label>
-                <textarea
-                  value={aiText}
-                  onChange={(e) => setAiText(e.target.value)}
-                  placeholder="เช่น: ข้าวกะเพราไก่ไข่ดาว 1 จาน / เวย์ 1 สกู๊ป + กล้วย 1 ลูก"
-                  onKeyDown={(e) => {
-                    if (e.key !== 'Enter') return;
-                    if (e.shiftKey) return;
-                    e.preventDefault();
-                    if (aiLoading) return;
-                    if (!aiText.trim() && !aiImage) return;
-                    void analyzeNutrition();
-                  }}
-                  className="h-24 w-full resize-none rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-base outline-none ring-0 focus:border-emerald-400/60 dark:border-white/10 dark:bg-neutral-900/60"
-                />
-
-                <div className="flex items-center justify-between gap-3">
-                  <label className="flex cursor-pointer items-center gap-2 rounded-2xl border border-black/10 bg-white/60 px-3 py-2 text-xs font-semibold text-neutral-700 transition hover:bg-white dark:border-white/10 dark:bg-neutral-900/60 dark:text-neutral-200">
-                    <span>{aiImage ? aiImage.name : 'Add photo (optional)'}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => setAiImage(e.target.files?.[0] ?? null)}
-                    />
-                  </label>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAiText('');
-                      setAiImage(null);
-                      setAiError(null);
-                      setAiResponse(null);
-                      lastAiMealProteinCreditRef.current = null;
-                    }}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-black/10 bg-white/60 px-4 py-2 text-xs font-bold text-neutral-700 transition hover:bg-white disabled:opacity-50 dark:border-white/10 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-900"
-                    disabled={aiLoading && !aiResponse}
-                  >
-                    Clear
+                  <button onClick={() => setAiOpen(false)} className="p-1 rounded-full hover:bg-white/10">
+                     <div className="w-6 h-1 bg-emerald-100/20 rounded-full" />
                   </button>
-
-                  <button
-                    onClick={analyzeNutrition}
-                    disabled={aiLoading || (!aiText.trim() && !aiImage)}
-                    className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow transition enabled:hover:bg-emerald-500 disabled:opacity-50"
-                  >
-                    {aiLoading ? 'Analyzing…' : 'Analyze'}
-                  </button>
-                </div>
-
-                {aiError && (
-                  <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700 dark:border-rose-500/20 dark:bg-rose-950/30 dark:text-rose-200">
-                    {aiError}
+               </div>
+               
+               <div className="p-6 space-y-4">
+                  <textarea
+                    value={aiText}
+                    onChange={(e) => setAiText(e.target.value)}
+                    placeholder="Describe your meal..."
+                    className="w-full h-32 bg-emerald-950/30 border border-white/10 rounded-xl p-4 text-white placeholder:text-emerald-100/20 focus:outline-none focus:border-emerald-500/50 transition-colors resize-none"
+                  />
+                  
+                  <div className="flex gap-3">
+                     <button 
+                        onClick={analyzeNutrition}
+                        disabled={aiLoading || !aiText}
+                        className="flex-1 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:hover:bg-emerald-500 text-white font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2 shadow-[0_0_10px_rgba(16,185,129,0.4)]"
+                     >
+                        {aiLoading ? <RotateCw className="animate-spin w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
+                        Analyze
+                     </button>
                   </div>
-                )}
 
-                {aiResponse?.results && aiResponse.results.length > 0 && (
-                  <div className="space-y-3">
-                    <div className="rounded-3xl border border-black/5 bg-white/70 p-4 dark:border-white/10 dark:bg-neutral-900/40">
-                      <div className="text-xs font-extrabold text-gray-900 dark:text-white">ผลการวิเคราะห์โภชนาการ</div>
-                      {aiResponse.reasoningSummary && (
-                        <div className="mt-1 text-[11px] text-gray-500 dark:text-neutral-400">
-                          {aiResponse.reasoningSummary}
-                        </div>
-                      )}
+                  {aiError && (
+                    <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                      {aiError}
+                    </div>
+                  )}
 
-                      <div className="mt-3 space-y-3">
-                        {aiResponse.results.map((r, idx) => (
-                          <div
-                            key={`${r.itemName}-${idx}`}
-                            className="rounded-3xl border border-black/5 bg-white/65 p-4 dark:border-white/10 dark:bg-neutral-950/25"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="text-sm font-extrabold tracking-tight text-gray-900 dark:text-white">
-                                  {r.itemName}
-                                </div>
-                                <div className="mt-0.5 text-[11px] text-gray-500 dark:text-neutral-400">
-                                  {r.assumedServing}
-                                </div>
+                  {aiResponse?.results && (
+                     <div className="space-y-3 mt-4">
+                        {aiResponse.results.map((r, i) => (
+                           <div key={i} className="bg-emerald-900/20 rounded-xl p-4 border border-white/5">
+                              <div className="flex justify-between items-start mb-2">
+                                 <span className="font-bold text-white">{r.itemName}</span>
+                                 <span className="text-emerald-400 font-bold">{r.caloriesKcal} kcal</span>
                               </div>
-                              <div
-                                className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold ${
-                                  r.confidence === 'high'
-                                    ? 'bg-emerald-600/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200'
-                                    : r.confidence === 'low'
-                                      ? 'bg-amber-600/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200'
-                                      : 'bg-sky-600/10 text-sky-700 dark:bg-sky-500/15 dark:text-sky-200'
-                                }`}
-                              >
-                                ความมั่นใจ: {r.confidence === 'high' ? 'สูง' : r.confidence === 'low' ? 'ต่ำ' : 'ปานกลาง'}
+                              <div className="flex gap-4 text-xs text-emerald-100/40">
+                                 <span>P: {r.proteinG}g</span>
+                                 <span>C: {r.carbsG}g</span>
+                                 <span>F: {r.fatG}g</span>
                               </div>
-                            </div>
-
-                            <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-                              <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                                <div className="text-[10px] text-gray-500 dark:text-neutral-400">kcal</div>
-                                <div className="text-sm font-extrabold text-gray-900 dark:text-white">
-                                  {r.caloriesKcal ?? '-'}
-                                </div>
-                              </div>
-                              <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                                <div className="text-[10px] text-gray-500 dark:text-neutral-400">โปรตีน</div>
-                                <div className="text-sm font-extrabold text-gray-900 dark:text-white">
-                                  {r.proteinG ?? '-'}
-                                </div>
-                              </div>
-                              <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                                <div className="text-[10px] text-gray-500 dark:text-neutral-400">คาร์บ</div>
-                                <div className="text-sm font-extrabold text-gray-900 dark:text-white">
-                                  {r.carbsG ?? '-'}
-                                </div>
-                              </div>
-                              <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                                <div className="text-[10px] text-gray-500 dark:text-neutral-400">ไขมัน</div>
-                                <div className="text-sm font-extrabold text-gray-900 dark:text-white">
-                                  {r.fatG ?? '-'}
-                                </div>
-                              </div>
-                            </div>
-
-                            {(r.fiberG != null || r.sugarG != null || r.sodiumMg != null) && (
-                              <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                                <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                                  <div className="text-[10px] text-gray-500 dark:text-neutral-400">ใยอาหาร</div>
-                                  <div className="text-xs font-bold text-gray-900 dark:text-white">{r.fiberG ?? '-'}</div>
-                                </div>
-                                <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                                  <div className="text-[10px] text-gray-500 dark:text-neutral-400">น้ำตาล</div>
-                                  <div className="text-xs font-bold text-gray-900 dark:text-white">{r.sugarG ?? '-'}</div>
-                                </div>
-                                <div className="rounded-2xl bg-black/5 px-2 py-2 dark:bg-white/5">
-                                  <div className="text-[10px] text-gray-500 dark:text-neutral-400">โซเดียม (mg)</div>
-                                  <div className="text-xs font-bold text-gray-900 dark:text-white">{r.sodiumMg ?? '-'}</div>
-                                </div>
-                              </div>
-                            )}
-
-                            {Array.isArray(r.notes) && r.notes.length > 0 && (
-                              <div className="mt-3 rounded-2xl border border-black/5 bg-white/70 px-3 py-2 text-[11px] text-gray-600 dark:border-white/10 dark:bg-neutral-950/30 dark:text-neutral-300">
-                                <div className="font-bold">หมายเหตุ</div>
-                                <ul className="mt-1 list-disc space-y-0.5 pl-4">
-                                  {r.notes.map((n, i) => (
-                                    <li key={i}>{n}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                            )}
-                          </div>
+                           </div>
                         ))}
-                      </div>
-                    </div>
-
-                    {aiResponse.followUpQuestions && aiResponse.followUpQuestions.length > 0 && (
-                      <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-[11px] text-amber-800 dark:border-amber-500/20 dark:bg-amber-950/30 dark:text-amber-200">
-                        <div className="text-xs font-extrabold">คำถามเพิ่มเติม (เพื่อความแม่นยำ)</div>
-                        <ul className="mt-2 list-disc space-y-1 pl-4">
-                          {aiResponse.followUpQuestions.map((q, i) => (
-                            <li key={i}>{q}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-between gap-3 rounded-3xl border border-black/5 bg-white/60 p-3 dark:border-white/10 dark:bg-neutral-900/40">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] font-bold text-neutral-600 dark:text-neutral-300">Save as:</span>
-                        <select
-                          value={aiMealType}
-                          onChange={(e) => setAiMealType(e.target.value as MealType)}
-                          className="rounded-2xl border border-black/10 bg-white/70 px-3 py-2 text-base font-semibold text-neutral-800 outline-none dark:border-white/10 dark:bg-neutral-950/50 dark:text-neutral-100"
+                        <button 
+                           onClick={saveAiAsMeal}
+                           className="w-full bg-[#E5E4E2] text-[#2D3B2E] font-bold py-3 rounded-xl hover:bg-white transition-colors"
                         >
-                          <option value="breakfast">Breakfast</option>
-                          <option value="lunch">Lunch</option>
-                          <option value="dinner">Dinner</option>
-                          <option value="snack">Snack</option>
-                        </select>
-                      </div>
-                      <button
-                        onClick={saveAiAsMeal}
-                        className="inline-flex items-center gap-2 rounded-2xl bg-neutral-900 px-3 py-2 text-xs font-bold text-white transition hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
-                      >
-                        <Plus className="h-4 w-4" />
-                        Save meal
-                      </button>
-                    </div>
-
-                    <div className="rounded-3xl border border-black/5 bg-white/60 p-3 text-[11px] text-neutral-600 dark:border-white/10 dark:bg-neutral-900/40 dark:text-neutral-300">
-                      Tip: Save meals from AI Nutrition to build accurate day totals.
-                    </div>
-                  </div>
-                )}
-                </div>
-              </div>
+                           Save to Log
+                        </button>
+                     </div>
+                  )}
+               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Save success popup (center) */}
+      {/* Exercise Detail Modal */}
       <AnimatePresence>
-        {saveSuccessOpen && (
+        {selectedExerciseLabel && (
           <motion.div
-            className="fixed inset-0 z-80 flex items-center justify-center"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            onClick={() => setSelectedExerciseLabel(null)}
           >
             <motion.div
-              className="absolute inset-0 bg-black/35 backdrop-blur-[2px]"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSaveSuccessOpen(false)}
-            />
-
-            <motion.div
-              initial={{ opacity: 0, y: 12, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 12, scale: 0.98 }}
-              transition={{ type: 'spring', stiffness: 520, damping: 38 }}
-              className="relative mx-4 w-[min(520px,calc(100vw-2rem))] overflow-hidden rounded-[28px] border border-white/20 bg-white/85 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-950/70"
-              role="status"
-              aria-live="polite"
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md bg-[#0a120f] border border-white/10 rounded-3xl overflow-hidden shadow-2xl max-h-[80vh] flex flex-col"
             >
-              {/* Subtle premium gradient */}
-              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_0%,rgba(16,185,129,0.22),transparent_60%),radial-gradient(60%_60%_at_0%_100%,rgba(59,130,246,0.16),transparent_55%)]" />
-
-              <div className="relative flex items-center gap-4">
-                <motion.div
-                  initial={{ rotate: -12, scale: 0.9, opacity: 0 }}
-                  animate={{ rotate: 0, scale: 1, opacity: 1 }}
-                  transition={{ type: 'spring', stiffness: 560, damping: 26, delay: 0.05 }}
-                  className="grid h-14 w-14 place-items-center rounded-3xl bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/20 dark:bg-emerald-400/10 dark:text-emerald-200 dark:ring-emerald-400/20"
-                >
-                  <CheckCircle2 className="h-7 w-7" />
-                </motion.div>
-
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-extrabold tracking-tight text-neutral-900 dark:text-white">
-                    บันทึกสำเร็จ
-                  </div>
-                  <div className="mt-0.5 text-xs text-neutral-600 dark:text-neutral-300">
-                    เพิ่มรายการอาหารลงใน Meals ของวันนี้แล้ว
-                  </div>
+              <div className="p-5 border-b border-white/10 flex justify-between items-start bg-emerald-950/30">
+                <div>
+                  <h3 className="text-xl font-bold text-white">{selectedExerciseDetail?.thaiName ?? selectedExerciseLabel}</h3>
+                  <p className="text-sm text-emerald-100/60">{selectedExerciseDetail?.primary?.join(', ') ?? 'Exercise Details'}</p>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => setSaveSuccessOpen(false)}
-                  className="rounded-2xl border border-black/10 bg-white/70 px-3 py-2 text-[11px] font-bold text-neutral-800 transition hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-neutral-100 dark:hover:bg-white/10"
-                >
-                  ปิด
+                <button onClick={() => setSelectedExerciseLabel(null)} className="p-2 rounded-full hover:bg-white/10 text-emerald-100/60 hover:text-white">
+                  <X className="w-5 h-5" />
                 </button>
               </div>
+              
+              <div className="p-5 overflow-y-auto space-y-6">
+                 {/* Focus */}
+                 <div className="space-y-2">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">Focus</h4>
+                    <div className="flex flex-wrap gap-2">
+                       {(selectedExerciseDetail?.focus ?? []).map((f, i) => (
+                          <span key={i} className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-bold border border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.1)]">
+                             {f}
+                          </span>
+                       ))}
+                    </div>
+                 </div>
 
-              <div className="relative mt-4">
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-black/5 dark:bg-white/10">
-                  <motion.div
-                    className="h-full rounded-full bg-emerald-500/80"
-                    initial={{ width: '0%' }}
-                    animate={{ width: '100%' }}
-                    transition={{ duration: 1.4, ease: 'easeOut' }}
-                  />
-                </div>
+                 {/* Steps */}
+                 <div className="space-y-2">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-100/40">How to</h4>
+                    <ol className="list-decimal list-inside space-y-1 text-sm text-emerald-100/80">
+                       {(selectedExerciseDetail?.steps ?? []).map((s, i) => (
+                          <li key={i} className="leading-relaxed">{s}</li>
+                       ))}
+                    </ol>
+                 </div>
+
+                 {/* Controls */}
+                 <div className="pt-4 border-t border-white/10 flex gap-3">
+                    <button
+                       onClick={() => {
+                          if (selectedExerciseLabel) incrementExercise(selectedExerciseLabel);
+                       }}
+                       className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2 shadow-[0_0_10px_rgba(16,185,129,0.4)]"
+                    >
+                       <Plus className="w-4 h-4" /> Add Set
+                    </button>
+                    <button
+                       onClick={() => {
+                          if (selectedExerciseLabel) resetExercise(selectedExerciseLabel);
+                       }}
+                       className="px-4 bg-white/5 hover:bg-white/10 text-white font-bold py-3 rounded-xl transition-colors border border-white/5"
+                    >
+                       <RotateCw className="w-4 h-4" />
+                    </button>
+                 </div>
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
+      {/* Dialogs */}
       <ConfirmDialog
         open={confirmResetOpen}
-        title="Reset today?"
-        description="This clears protein, workout progress, and saved meals for today."
-        confirmLabel="Reset day"
+        title="Reset Day"
+        description="Start fresh? This clears all progress."
+        confirmLabel="Reset"
         variant="danger"
         prefersReducedMotion={prefersReducedMotion}
         onClose={() => setConfirmResetOpen(false)}
@@ -859,633 +1975,51 @@ function FitnessApp() {
 
       <ConfirmDialog
         open={!!mealToDelete}
-        title="Delete this meal?"
-        description="This can’t be undone."
+        title="Delete Meal?"
+        description="This cannot be undone."
         confirmLabel="Delete"
         variant="danger"
         prefersReducedMotion={prefersReducedMotion}
         onClose={() => setMealToDelete(null)}
         onConfirm={() => {
-          const id = mealToDelete;
+          if (mealToDelete) deleteMeal(mealToDelete);
           setMealToDelete(null);
-          if (id) deleteMeal(id);
         }}
       />
+      
+      {/* Save Success Toast */}
+      <AnimatePresence>
+         {saveSuccessOpen && (
+            <motion.div 
+               initial={{ opacity: 0, y: 50 }}
+               animate={{ opacity: 1, y: 0 }}
+               exit={{ opacity: 0, y: 50 }}
+               className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-white px-6 py-3 rounded-full shadow-lg font-bold flex items-center gap-2"
+            >
+               <CheckCircle2 className="w-5 h-5" />
+               Saved successfully
+            </motion.div>
+         )}
+      </AnimatePresence>
 
-      <Header onReset={() => setConfirmResetOpen(true)} />
+      {/* Coach Success Toast */}
+      <AnimatePresence>
+         {coachSuccessOpen && (
+            <motion.div 
+               initial={{ opacity: 0, y: 50 }}
+               animate={{ opacity: 1, y: 0 }}
+               exit={{ opacity: 0, y: 50 }}
+               className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-white px-6 py-3 rounded-full shadow-lg font-bold flex items-center gap-2"
+            >
+               <CheckCircle2 className="w-5 h-5" />
+               Coach updated
+            </motion.div>
+         )}
+      </AnimatePresence>
 
-  <main className="max-w-6xl mx-auto p-4 md:p-6 space-y-6">
-
-        <div className="flex items-center justify-between rounded-3xl border border-black/5 bg-white/60 p-4 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-white/5">
-          <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400">
-              <Sparkles className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="text-sm font-extrabold text-neutral-900 dark:text-white">AI Coach</div>
-              <div className="text-xs text-neutral-500 dark:text-neutral-400">วางแผนการกินและออกกำลังกายส่วนตัว</div>
-            </div>
-          </div>
-
-          <a
-            href="/coach"
-            className="rounded-2xl bg-neutral-900 px-4 py-2 text-xs font-bold text-white transition hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
-          >
-            Open Coach
-          </a>
-        </div>
-
-        <MobileTabs
-          value={mobileTab}
-          onChange={setMobileTab}
-          mealsCount={meals.length}
-          progressPercent={progress}
-          prefersReducedMotion={prefersReducedMotion}
-        />
-
-        <NutritionSection
-          mobileVisible={mobileTab === 'nutrition'}
-          prefersReducedMotion={prefersReducedMotion}
-          meals={meals}
-          kcalAnimated={kcalAnimated}
-          pAnimated={pAnimated}
-          cAnimated={cAnimated}
-          fAnimated={fAnimated}
-          onOpenAi={() => setAiOpen(true)}
-          onRequestDeleteMeal={(id) => setMealToDelete(id)}
-        />
-
-        {/* Hero Section */}
-        <motion.header
-          variants={staggerContainer}
-          initial={prefersReducedMotion ? false : 'hidden'}
-          animate={prefersReducedMotion ? false : 'show'}
-          className={`py-6 md:py-10 ${mobileTab === 'workout' ? '' : 'hidden md:block'}`}
-        >
-          <motion.div
-            variants={fadeUp}
-            transition={springy(prefersReducedMotion)}
-            className="flex flex-col md:flex-row md:items-end justify-between gap-4"
-          >
-            <div>
-              <h2 className="font-medium mb-1 flex items-center gap-2
-                text-gray-500 dark:text-neutral-400">
-                <Activity className="w-4 h-4 text-emerald-600 dark:text-emerald-500" />
-                Today&apos;s Focus
-              </h2>
-              <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight
-                text-gray-900 dark:text-white">
-                {todaySchedule.title}
-              </h1>
-              <p className="mt-2 font-medium flex items-center gap-2
-                text-emerald-600 dark:text-emerald-400">
-                <Zap className="w-4 h-4" /> {todaySchedule.focus}
-              </p>
-            </div>
-
-            {/* Progress Circle (Desktop) */}
-            <div className="hidden md:flex items-center gap-4 p-4 rounded-2xl border backdrop-blur-md transition-all
-              bg-white/50 border-gray-200 shadow-sm
-              dark:bg-white/5 dark:border-white/5 dark:shadow-none">
-              <div className="relative w-16 h-16">
-                <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                  <circle cx="50" cy="50" r="45" fill="none"
-                    className="stroke-gray-200 dark:stroke-neutral-800" strokeWidth="8" />
-                  <motion.circle
-                    cx="50" cy="50" r="45" fill="none"
-                    className="stroke-emerald-500 dark:stroke-emerald-500"
-                    strokeWidth="8" strokeLinecap="round"
-                    initial={{ pathLength: 0 }}
-                    animate={{ pathLength: progress / 100 }}
-                    transition={{ duration: 1, ease: "easeOut" }}
-                  />
-                </svg>
-                <div className="absolute inset-0 flex items-center justify-center text-xs font-bold
-                  text-gray-900 dark:text-white">
-                  {Math.round(progress)}%
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-500 dark:text-neutral-400">Daily Protein</div>
-                <div className="text-xl font-bold text-gray-900 dark:text-white">
-                  {Math.round(proteinAnimated)} <span className="text-gray-400 dark:text-neutral-500 text-sm">/ 180g</span>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        </motion.header>
-
-  {/* Bento Grid Layout */}
-  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6">
-
-          {/* Left Column: Workout List (Span 8) */}
-          <div className={`md:col-span-8 space-y-4 ${mobileTab === 'workout' ? '' : 'hidden md:block'}`}>
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-xl font-semibold flex items-center gap-2 text-gray-900 dark:text-white">
-                <TrendingUp className="w-5 h-5 text-emerald-600 dark:text-emerald-500" /> Workout Plan
-              </h3>
-              <span className="text-xs text-gray-500 dark:text-neutral-500">{todaySchedule.exercises.length} Exercises</span>
-            </div>
-
-            <div className="grid gap-3">
-              {todaySchedule.exercises.map((ex, index) => {
-                const item = workoutState[ex] ?? { target: parseWorkoutTarget(ex), count: 0 };
-                const done = item.count >= item.target;
-                return (
-                  <motion.div
-                    key={index}
-                    initial={false}
-                    animate={false}
-                    transition={undefined}
-                    onClick={() => setSelectedExerciseLabel(ex)}
-                    className={`
-                        group relative p-5 rounded-2xl cursor-pointer border transition-all duration-200 shadow-sm
-                        ${done
-                        ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-900/10 dark:border-emerald-500/20'
-                        : 'bg-white border-gray-100 hover:border-emerald-200 hover:shadow-md dark:bg-neutral-900 dark:border-neutral-800 dark:hover:border-neutral-700 dark:hover:bg-neutral-800/50'
-                      }
-                      `}
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className={`
-                          w-6 h-6 rounded-full flex items-center justify-center border transition-colors duration-200
-                          ${done
-                          ? 'bg-emerald-500 border-emerald-500'
-                          : 'border-gray-300 dark:border-neutral-600 group-hover:border-emerald-400'
-                        }
-                        `}>
-                        {done && <CheckCircle2 className="w-4 h-4 text-white dark:text-neutral-950" />}
-                      </div>
-                      <div className="flex-1">
-                        <h4 className={`font-medium text-lg transition-colors ${done ?
-                          'text-emerald-600/60 line-through decoration-emerald-500/40 dark:text-emerald-500/60'
-                          : 'text-gray-800 dark:text-neutral-200'}`}>
-                          {ex}
-                        </h4>
-                        <div className="mt-2 flex items-center gap-3">
-                          <div
-                            className={`relative overflow-hidden rounded-2xl border px-3 py-2 text-sm font-semibold tabular-nums transition-colors
-                              ${done
-                                ? 'bg-emerald-100 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-500/20'
-                                : 'bg-gray-50 border-gray-200 dark:bg-neutral-950/40 dark:border-neutral-800'
-                              }`}
-                            aria-label={`sets ${item.count} of ${item.target}`}
-                          >
-                            <div
-                              className={`absolute inset-0 opacity-70 ${done ? 'bg-emerald-500/10' : 'bg-emerald-500/8'}`}
-                              style={{
-                                clipPath: `inset(0 ${Math.max(0, 100 - (item.target ? (item.count / item.target) * 100 : 0))}% 0 0 round 16px)`,
-                              }}
-                            />
-                            <div className="relative flex items-baseline gap-1">
-                              <span className={done ? 'text-emerald-800 dark:text-emerald-200' : 'text-gray-900 dark:text-neutral-200'}>{item.count}</span>
-                              <span className="text-gray-500 dark:text-neutral-500">/</span>
-                              <span className="text-gray-500 dark:text-neutral-400">{item.target}</span>
-                              <span className="ml-1 text-[11px] font-semibold text-gray-400 dark:text-neutral-500">sets</span>
-                            </div>
-                          </div>
-
-                          <div className="flex-1" />
-
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); incrementExercise(ex); }}
-                            className="inline-flex items-center gap-1.5 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-extrabold text-emerald-700 shadow-sm hover:bg-emerald-100 dark:border-emerald-500/20 dark:bg-emerald-950/30 dark:text-emerald-200 dark:hover:bg-emerald-950/45"
-                            aria-label="เพิ่มจำนวนเซ็ต"
-                          >
-                            <Plus className="w-4 h-4" />
-                            <span className="hidden sm:inline">Add</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      <ChevronRight className={`w-5 h-5 text-gray-300 dark:text-neutral-700 transition-transform ${done ? 'opacity-0' : 'group-hover:translate-x-1'}`} />
-                    </div>
-                  </motion.div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Exercise details modal */}
-          <AnimatePresence initial={false}>
-            {selectedExerciseLabel && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.18, ease: 'easeOut' }}
-                className="fixed inset-0 z-50"
-                onClick={() => setSelectedExerciseLabel(null)}
-                aria-hidden
-              >
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.18, ease: 'easeOut' }}
-                  className="absolute inset-0 bg-black/35 backdrop-blur-[2px]"
-                />
-
-                <motion.div
-                  initial={{ opacity: 0, y: 36, scale: 0.98 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 36, scale: 0.98 }}
-                  transition={{ type: 'spring', stiffness: 320, damping: 28, mass: 0.9 }}
-                  className="fixed bottom-0 left-0 right-0 z-50 max-h-[88vh] w-full overflow-hidden rounded-t-4xl border border-white/10 bg-white/92 shadow-2xl backdrop-blur-xl dark:bg-neutral-950/88 md:bottom-auto md:left-1/2 md:top-1/2 md:max-h-[84vh] md:w-[min(92vw,820px)] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-4xl"
-                  onClick={(e) => e.stopPropagation()}
-                  role="dialog"
-                  aria-label="Exercise details"
-                >
-                  {/* Header (sticky) */}
-                  <div className="sticky top-0 z-10 border-b border-black/5 bg-white/55 px-5 pb-4 pt-3 shadow-[0_18px_40px_-28px_rgba(0,0,0,0.35)] backdrop-blur-2xl dark:border-white/10 dark:bg-neutral-950/45">
-                    {/* drag handle (mobile) */}
-                    <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-black/10 dark:bg-white/10 md:hidden" />
-
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="inline-flex items-center gap-2">
-                          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/35 bg-white/35 px-2.5 py-1 text-[11px] font-extrabold tracking-wide text-neutral-900 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:text-white">
-                            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/90 text-white shadow-sm dark:bg-emerald-400/90">
-                              <Dumbbell className="h-3.5 w-3.5" />
-                            </span>
-                            <span className="uppercase">{selectedExerciseDetail?.category ?? 'workout'}</span>
-                          </span>
-                          <span className="hidden text-[11px] font-semibold text-neutral-500 dark:text-neutral-400 sm:inline">
-                            tap outside to close
-                          </span>
-                        </div>
-
-                        <div className="mt-2 truncate text-lg font-black tracking-tight text-neutral-950 dark:text-white">
-                          {selectedExerciseDetail?.thaiName ?? selectedExerciseLabel}
-                        </div>
-
-                        <div className="mt-1 text-xs font-semibold text-neutral-700/90 dark:text-neutral-200/85">
-                          {selectedExerciseDetail?.primary?.length
-                            ? `กล้ามเนื้อหลัก: ${selectedExerciseDetail.primary.join(' • ')}`
-                            : 'รายละเอียดท่าออกกำลังกาย'}
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() => setSelectedExerciseLabel(null)}
-                        className="rounded-2xl border border-black/10 bg-white/70 px-3 py-2 text-xs font-bold text-neutral-700 shadow-sm transition hover:bg-white active:scale-[0.98] dark:border-white/10 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-900"
-                      >
-                        ปิด
-                      </button>
-                    </div>
-
-                    {/* premium glass wash */}
-                    <div className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-36 bg-linear-to-b from-emerald-500/16 via-cyan-500/8 to-transparent dark:from-emerald-400/14 dark:via-cyan-400/6" />
-                    <div className="pointer-events-none absolute -right-16 -top-20 -z-10 h-48 w-48 rounded-full bg-emerald-500/12 blur-3xl dark:bg-emerald-400/10" />
-                    <div className="pointer-events-none absolute -left-20 -top-24 -z-10 h-56 w-56 rounded-full bg-cyan-500/10 blur-3xl dark:bg-cyan-400/8" />
-                  </div>
-
-                  <div className="max-h-[calc(88vh-84px)] overflow-y-auto overscroll-contain px-5 pb-6 pt-4 md:max-h-[calc(84vh-96px)] md:px-6">
-                    {/* Details */}
-                    <div className="space-y-4 md:col-span-2">
-                      {/* Key cues (poster chips) */}
-                      <div className="rounded-3xl border border-black/5 bg-white/60 p-4 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-neutral-900/35">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-xs font-black tracking-wide text-neutral-700 dark:text-neutral-200">KEY CUES</div>
-                          <div className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400">เลื่อนซ้าย/ขวา</div>
-                        </div>
-
-                        {(() => {
-                          const chips = (selectedExerciseDetail?.cues?.length
-                            ? selectedExerciseDetail.cues
-                            : selectedExerciseDetail?.focus ?? [])
-                            .slice(0, 8);
-
-                          return (
-                            <div className="mt-3 flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                              {chips.length ? (
-                                chips.map((c, i) => (
-                                  <span
-                                    key={`${c}-${i}`}
-                                    className="group inline-flex shrink-0 items-center gap-2 rounded-full border border-white/35 bg-white/55 px-3.5 py-2 text-xs font-extrabold text-neutral-900 shadow-sm backdrop-blur-xl transition hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/8"
-                                  >
-                                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500/90 text-white shadow-sm transition group-hover:scale-[1.03] dark:bg-emerald-400/90">
-                                      <Zap className="h-3.5 w-3.5" />
-                                    </span>
-                                    {c}
-                                  </span>
-                                ))
-                              ) : (
-                                <span className="text-sm text-neutral-600 dark:text-neutral-300">กำลังเตรียมคิวสำคัญ…</span>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      </div>
-
-                      {/* Quick summary */}
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <div className="relative overflow-hidden rounded-3xl border border-white/35 bg-white/55 p-4 shadow-[0_18px_45px_-32px_rgba(0,0,0,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-                          <div className="absolute -right-10 -top-10 h-24 w-24 rounded-full bg-emerald-500/10 blur-2xl" />
-                          <div className="text-xs font-black tracking-wide text-neutral-800 dark:text-neutral-100">โฟกัสตอนเล่น</div>
-                          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-neutral-800 dark:text-neutral-200">
-                            {(selectedExerciseDetail?.focus ?? []).map((s, i) => (
-                              <li key={i}>{s}</li>
-                            ))}
-                            {!selectedExerciseDetail?.focus?.length && <li>คุมฟอร์มให้มั่นคง และหายใจสม่ำเสมอ</li>}
-                          </ul>
-                        </div>
-
-                        <div className="relative overflow-hidden rounded-3xl border border-white/35 bg-white/55 p-4 shadow-[0_18px_45px_-32px_rgba(0,0,0,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-                          <div className="absolute -left-10 -bottom-10 h-24 w-24 rounded-full bg-cyan-500/10 blur-2xl" />
-                          <div className="text-xs font-black tracking-wide text-neutral-800 dark:text-neutral-100">ได้ส่วนไหน / ได้อะไร</div>
-                          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-neutral-800 dark:text-neutral-200">
-                            {(selectedExerciseDetail?.youGet ?? []).map((s, i) => (
-                              <li key={i}>{s}</li>
-                            ))}
-                            {!selectedExerciseDetail?.youGet?.length && <li>เพิ่มความแข็งแรงและความฟิตโดยรวม</li>}
-                          </ul>
-                        </div>
-                      </div>
-
-                      <div className="rounded-3xl border border-white/35 bg-white/55 p-4 shadow-[0_18px_45px_-32px_rgba(0,0,0,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-                        <div className="text-xs font-black tracking-wide text-neutral-800 dark:text-neutral-100">วิธีทำ (สรุป)</div>
-                        <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-neutral-800 dark:text-neutral-200">
-                          {(selectedExerciseDetail?.steps ?? ['กำลังเตรียมรายละเอียดท่านี้…']).map((s, i) => (
-                            <li key={i}>{s}</li>
-                          ))}
-                        </ol>
-                      </div>
-
-                      <div className="rounded-3xl border border-white/35 bg-white/55 p-4 shadow-[0_18px_45px_-32px_rgba(0,0,0,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-                        <div className="text-xs font-black tracking-wide text-neutral-800 dark:text-neutral-100">คิวสำคัญ</div>
-                        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-neutral-800 dark:text-neutral-200">
-                          {(selectedExerciseDetail?.cues ?? []).map((s, i) => (
-                            <li key={i}>{s}</li>
-                          ))}
-                          {!selectedExerciseDetail?.cues?.length && <li>คุมท่าให้มั่นคง และหายใจสม่ำเสมอ</li>}
-                        </ul>
-                      </div>
-
-                      <div className="rounded-3xl border border-white/35 bg-white/55 p-4 shadow-[0_18px_45px_-32px_rgba(0,0,0,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-                        <div className="text-xs font-black tracking-wide text-neutral-800 dark:text-neutral-100">ข้อผิดพลาดที่พบบ่อย</div>
-                        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-neutral-800 dark:text-neutral-200">
-                          {(selectedExerciseDetail?.mistakes ?? []).map((s, i) => (
-                            <li key={i}>{s}</li>
-                          ))}
-                          {!selectedExerciseDetail?.mistakes?.length && <li>อย่าเร่งจังหวะจนเสียฟอร์ม</li>}
-                        </ul>
-                      </div>
-
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <div className="rounded-3xl border border-white/35 bg-white/55 p-4 shadow-[0_18px_45px_-32px_rgba(0,0,0,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-                          <div className="text-xs font-black tracking-wide text-neutral-800 dark:text-neutral-100">ความปลอดภัย / ข้อควรระวัง</div>
-                          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-neutral-800 dark:text-neutral-200">
-                            {(selectedExerciseDetail?.safety ?? []).map((s, i) => (
-                              <li key={i}>{s}</li>
-                            ))}
-                            {!selectedExerciseDetail?.safety?.length && <li>ลดน้ำหนักทันทีถ้าฟอร์มเริ่มเสีย</li>}
-                          </ul>
-                        </div>
-
-                        <div className="rounded-3xl border border-white/35 bg-white/55 p-4 shadow-[0_18px_45px_-32px rgba(0,0,0,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-                          <div className="text-xs font-black tracking-wide text-neutral-800 dark:text-neutral-100">จังหวะ / การหายใจ</div>
-                          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-neutral-800 dark:text-neutral-200">
-                            {(selectedExerciseDetail?.tempoBreathing ?? []).map((s, i) => (
-                              <li key={i}>{s}</li>
-                            ))}
-                            {!selectedExerciseDetail?.tempoBreathing?.length && <li>คุมลงช้า ออกแรงตอนดัน/ดึง</li>}
-                          </ul>
-                        </div>
-                      </div>
-
-                      {/* Set controls */}
-                      {selectedExerciseLabel && (
-                        <div className="flex flex-col gap-3 rounded-3xl border border-black/5 bg-white/80 p-4 shadow-sm dark:border-white/10 dark:bg-neutral-900/45 md:flex-row md:items-center md:justify-between">
-                          {(() => {
-                            const item = workoutState[selectedExerciseLabel] ?? { target: parseWorkoutTarget(selectedExerciseLabel), count: 0 };
-                            return (
-                              <>
-                                <div className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">
-                                  เซ็ตวันนี้: <span className="font-extrabold">{item.count}</span>
-                                  <span className="text-neutral-500 dark:text-neutral-400"> / {item.target}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => incrementExercise(selectedExerciseLabel)}
-                                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2.5 text-xs font-extrabold text-white shadow-sm transition hover:bg-emerald-500 active:scale-[0.98]"
-                                  >
-                                    <Plus className="h-4 w-4" /> เพิ่มเซ็ต
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => resetExercise(selectedExerciseLabel)}
-                                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-black/10 bg-white/70 px-4 py-2.5 text-xs font-extrabold text-neutral-800 shadow-sm transition hover:bg-white active:scale-[0.98] dark:border-white/10 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-900"
-                                  >
-                                    <RotateCw className="h-4 w-4" /> รีเซ็ต
-                                  </button>
-                                </div>
-                              </>
-                            );
-                          })()}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </motion.div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Right Column: Protein & Extras (Span 4) */}
-          <div className={`md:col-span-4 space-y-6 ${mobileTab === 'protein' ? '' : 'hidden md:block'}`}>
-
-            {/* Mobile Progress Card */}
-            <div className="md:hidden p-6 rounded-3xl border shadow-sm
-              bg-white border-gray-100
-              dark:bg-neutral-900 dark:border-neutral-800 dark:shadow-none">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="font-semibold text-gray-900 dark:text-neutral-200">Daily Protein</h3>
-                <span className="text-emerald-600 dark:text-emerald-500 font-bold">{Math.round(progress)}%</span>
-              </div>
-              <div className="h-3 w-full bg-gray-100 dark:bg-neutral-800 rounded-full overflow-hidden">
-                <motion.div
-                  className="h-full bg-emerald-500"
-                  initial={{ width: 0 }}
-                  animate={{ width: `${progress}%` }}
-                />
-              </div>
-              <div className="mt-2 text-right text-sm text-gray-500 dark:text-neutral-400">
-                {protein} / 180g
-              </div>
-            </div>
-
-            {/* Quick Add Protein */}
-            <div className="p-6 rounded-3xl border shadow-sm space-y-6
-              bg-white border-gray-100
-              dark:bg-neutral-900 dark:border-neutral-800 dark:shadow-none">
-
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-gray-500 dark:text-neutral-300">
-                  <Utensils className="w-4 h-4" />
-                  <span className="text-xs font-bold uppercase tracking-wider">Protein (Tap to add)</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowLog(v => !v)}
-                  className="inline-flex items-center gap-2 text-xs text-gray-400 hover:text-emerald-600 dark:text-neutral-400 dark:hover:text-white transition-colors"
-                >
-                  <ListPlus className="w-4 h-4" /> Log
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3">
-                {proteinItems.map((item, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => addProtein({ label: item.label, grams: item.grams, category: item.category, calories: item.calories })}
-                    className="flex items-center gap-4 p-3 rounded-xl border border-transparent transition-all group
-                      bg-gray-50 hover:bg-gray-100 hover:border-emerald-200 hover:shadow-sm
-                      dark:bg-neutral-800/50 dark:hover:bg-neutral-800 dark:hover:border-neutral-700"
-                  >
-                    <div className="w-10 h-10 rounded-lg flex items-center justify-center transition-colors
-                      bg-white text-gray-400 group-hover:text-emerald-500 shadow-sm
-                      dark:bg-neutral-950 dark:text-neutral-400 dark:group-hover:text-emerald-400 dark:shadow-none">
-                      <item.icon className="w-5 h-5" />
-                    </div>
-                    <div className="text-left flex-1">
-                      <div className="font-medium text-gray-800 dark:text-neutral-200">{item.label}</div>
-                      <div className="text-xs text-gray-500 dark:text-neutral-500">{item.desc}</div>
-                    </div>
-                    <div className="text-emerald-600 dark:text-emerald-500 font-bold text-sm">+{item.grams}g</div>
-                  </button>
-                ))}
-              </div>
-
-              <AnimatePresence>
-                {showLog && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="mt-2 rounded-2xl border p-4
-                      bg-gray-50 border-gray-200
-                      dark:bg-neutral-950/30 dark:border-neutral-800">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="text-sm font-semibold flex items-center gap-2
-                          text-gray-700 dark:text-neutral-200">
-                          <Sparkles className="w-4 h-4 text-emerald-500" /> Today&apos;s additions
-                        </div>
-                      </div>
-
-                      {proteinEvents.length === 0 ? (
-                        <div className="text-sm text-gray-400 dark:text-neutral-500">No additions yet.</div>
-                      ) : (
-                        <div className="space-y-2">
-                          {proteinEvents.slice(0, 5).map(ev => (
-                            <div key={ev.id} className="flex items-center justify-between text-sm">
-                              <div className="min-w-0 flex-1 pr-2">
-                                <div className="truncate text-gray-800 dark:text-neutral-200">{ev.label}</div>
-                                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-neutral-600">
-                                  <span>{new Date(ev.ts).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</span>
-                                  <span>•</span>
-                                  <span>{ev.category.replace('_', ' ')}</span>
-                                </div>
-                              </div>
-                              <div className="text-right">
-                                <div className="font-bold text-emerald-600 dark:text-emerald-500">+{ev.grams}g</div>
-                                {ev.calories !== undefined && ev.calories > 0 && (
-                                  <div className="text-[10px] font-medium text-gray-400 dark:text-neutral-500">
-                                    {ev.calories} kcal
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowLog(v => !v)}
-                  className="w-full py-3 rounded-xl border text-xs transition-all
-                    border-gray-200 text-gray-600 hover:bg-gray-50
-                    dark:border-neutral-800 dark:text-neutral-300 dark:hover:bg-white/5"
-                >
-                  {showLog ? 'Hide log' : 'Show log'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirmResetOpen(true)}
-                  className="w-full py-3 rounded-xl border text-xs transition-all inline-flex items-center justify-center gap-2
-                    border-red-200 bg-red-50 text-red-600 hover:bg-red-100
-                    dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200 dark:hover:bg-red-950/35"
-                >
-                  <Trash2 className="w-4 h-4" /> Reset day
-                </button>
-              </div>
-            </div>
-
-            {/* Tips Card */}
-            {dayOfWeek >= 1 && dayOfWeek <= 5 && dayOfWeek !== 3 && (
-              <div className="flex items-start gap-3">
-                {/* Icon trigger */}
-                <button
-                  type="button"
-                  onClick={() => setTipOpen((v: boolean) => !v)}
-                  className="shrink-0 h-12 w-12 grid place-items-center rounded-2xl border transition-colors
-                    bg-white border-gray-200 hover:bg-gray-50
-                    dark:border-neutral-800 dark:bg-neutral-900/60 dark:hover:bg-neutral-900"
-                  aria-label="Toggle tip"
-                >
-                  <motion.div
-                    animate={{ rotate: tipOpen ? 360 : 0 }}
-                    transition={{ duration: 0.75, ease: 'easeInOut' }}
-                  >
-                    <Flame className="w-5 h-5 text-amber-500 dark:text-amber-400" />
-                  </motion.div>
-                </button>
-
-                {/* Slide-out tip panel */}
-                <div className="flex-1">
-                  <AnimatePresence initial={false}>
-                    {tipOpen && (
-                      <motion.div
-                        initial={{ opacity: 0, x: -10, height: 0 }}
-                        animate={{ opacity: 1, x: 0, height: 'auto' }}
-                        exit={{ opacity: 0, x: -10, height: 0 }}
-                        transition={{ duration: 0.35, ease: 'easeOut' }}
-                        className="overflow-hidden rounded-3xl border p-5
-                          bg-linear-to-br from-amber-50 to-orange-50 border-amber-200
-                          dark:from-amber-900/10 dark:to-orange-900/10 dark:border-amber-500/15"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <h4 className="font-bold text-amber-700 dark:text-amber-200 text-sm">Pre-workout Tip</h4>
-                          <span className="text-[11px] text-amber-400 dark:text-amber-200/40">tap icon to close</span>
-                        </div>
-                        <p className="text-xs text-amber-800/80 dark:text-amber-200/60 mt-2 leading-relaxed">
-                          Consume complex carbs (Banana/Oats) 45–60 mins before training for sustained energy.
-                        </p>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  {!tipOpen && (
-                    <div className="text-xs text-gray-400 dark:text-neutral-500 mt-1">Tap the icon for a quick tip</div>
-                  )}
-                </div>
-              </div>
-            )}
-
-          </div>
-        </div>
-      </main>
     </div>
   );
 }
 
 export default dynamic(() => Promise.resolve(FitnessApp), { ssr: false });
+
