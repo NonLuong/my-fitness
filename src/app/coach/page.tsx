@@ -609,7 +609,7 @@ export default function CoachPage() {
                         value={draftProfile.ageYears}
                         onChange={(e) => setDraftProfile((d) => ({ ...d, ageYears: e.target.value }))}
                         onBlur={() => commitNumber('ageYears', draftProfile.ageYears, { min: 10, max: 90 })}
-                        className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-lg font-bold text-neutral-900 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-neutral-800 dark:bg-neutral-950 dark:text-white"
+                        className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-lg font-bold text-neutral-900 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-neutral-800 dark:bg-neutral-950 dark:text-white transition-colors duration-500 ease-in-out"
                       />
                     </label>
                     <label className="space-y-2">
@@ -620,7 +620,7 @@ export default function CoachPage() {
                         value={draftProfile.heightCm}
                         onChange={(e) => setDraftProfile((d) => ({ ...d, heightCm: e.target.value }))}
                         onBlur={() => commitNumber('heightCm', draftProfile.heightCm, { min: 120, max: 230 })}
-                        className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-lg font-bold text-neutral-900 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-neutral-800 dark:bg-neutral-950 dark:text-white"
+                        className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-lg font-bold text-neutral-900 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-neutral-800 dark:bg-neutral-950 dark:text-white transition-colors duration-500 ease-in-out"
                       />
                     </label>
                     <label className="space-y-2">
@@ -631,7 +631,7 @@ export default function CoachPage() {
                         value={draftProfile.weightKg}
                         onChange={(e) => setDraftProfile((d) => ({ ...d, weightKg: e.target.value }))}
                         onBlur={() => commitNumber('weightKg', draftProfile.weightKg, { min: 30, max: 250 })}
-                        className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-lg font-bold text-neutral-900 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-neutral-800 dark:bg-neutral-950 dark:text-white"
+                        className="w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-lg font-bold text-neutral-900 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 dark:border-neutral-800 dark:bg-neutral-950 dark:text-white transition-colors duration-500 ease-in-out"
                       />
                     </label>
                   </div>
@@ -642,7 +642,7 @@ export default function CoachPage() {
                 onClick={nextStep}
                 disabled={!canSubmit}
                 className={cn(
-                  'flex w-full items-center justify-center gap-2 rounded-2xl py-4 text-base font-bold transition',
+                  'flex w-full items-center justify-center gap-2 rounded-2xl py-4 text-base font-bold transition-all duration-500 ease-in-out',
                   canSubmit
                     ? 'bg-neutral-900 text-white shadow-lg shadow-neutral-900/20 hover:scale-[1.02] active:scale-[0.98] dark:bg-white dark:text-neutral-900'
                     : 'cursor-not-allowed bg-neutral-200 text-neutral-400 dark:bg-neutral-800 dark:text-neutral-600'
@@ -672,7 +672,7 @@ export default function CoachPage() {
                     key={k}
                     onClick={() => setProfile((p) => ({ ...p, activity: k as ActivityLevel }))}
                     className={cn(
-                      'flex w-full items-center gap-4 rounded-2xl border p-4 text-left transition',
+                      'flex w-full items-center gap-4 rounded-2xl border p-4 text-left transition-all duration-500 ease-in-out',
                       profile.activity === k
                         ? 'border-emerald-500 bg-emerald-50/50 ring-1 ring-emerald-500 dark:border-emerald-500 dark:bg-emerald-500/10'
                         : 'border-black/5 bg-white hover:bg-neutral-50 dark:border-white/10 dark:bg-neutral-900 dark:hover:bg-neutral-800'
@@ -685,7 +685,7 @@ export default function CoachPage() {
                       <Activity className="h-5 w-5" />
                     </div>
                     <div>
-                      <div className={cn("font-bold", profile.activity === k ? "text-emerald-700 dark:text-emerald-400" : "text-neutral-900 dark:text-white")}>
+                      <div className={cn("font-bold transition-colors duration-500 ease-in-out", profile.activity === k ? "text-emerald-700 dark:text-emerald-400" : "text-neutral-900 dark:text-white")}>
                         {k === 'sedentary' && 'นั่งทำงานเป็นหลัก'}
                         {k === 'light' && 'ขยับบ้างเล็กน้อย'}
                         {k === 'moderate' && 'ปานกลาง'}

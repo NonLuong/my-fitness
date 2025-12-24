@@ -26,11 +26,11 @@ export function MobileTabs(props: {
 
   return (
     <div className="md:hidden sticky top-18 z-40">
-      <div className="rounded-3xl border border-black/5 bg-white/70 p-1.5 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-neutral-950/50">
+      <div className="rounded-3xl border border-emerald-900/10 bg-white/70 p-1.5 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-[#0a120f]/50 transition-colors duration-500 ease-in-out">
         <div className="relative grid grid-cols-3 gap-1">
           <motion.div
             aria-hidden
-            className="pointer-events-none absolute inset-y-1 left-1 w-[calc(33.333%-0.25rem)] rounded-2xl bg-neutral-900 shadow-sm dark:bg-white"
+            className="pointer-events-none absolute inset-y-1 left-1 w-[calc(33.333%-0.25rem)] rounded-2xl bg-emerald-500 shadow-sm dark:bg-white"
             initial={false}
             animate={{ x: value === 'workout' ? '0%' : value === 'nutrition' ? '100%' : '200%' }}
             transition={
@@ -48,10 +48,10 @@ export function MobileTabs(props: {
               type="button"
               onClick={() => onChange(t.id)}
               className={cn(
-                'relative z-10 inline-flex items-center justify-center gap-2 rounded-2xl px-3 py-2 text-xs font-extrabold transition active:scale-[0.99]',
+                'relative z-10 inline-flex items-center justify-center gap-2 rounded-2xl px-3 py-2 text-xs font-extrabold transition-all duration-500 ease-in-out active:scale-[0.99]',
                 value === t.id
-                  ? 'text-white dark:text-neutral-900'
-                  : 'text-neutral-600 hover:bg-black/5 dark:text-neutral-300 dark:hover:bg-white/5'
+                  ? 'text-white dark:text-emerald-900'
+                  : 'text-emerald-900/60 hover:bg-emerald-900/5 dark:text-emerald-100/60 dark:hover:bg-white/5'
               )}
               aria-pressed={value === t.id}
             >
@@ -61,10 +61,10 @@ export function MobileTabs(props: {
               {t.id === 'nutrition' && mealsCount > 0 && (
                 <span
                   className={cn(
-                    'ml-0.5 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-black',
+                    'ml-0.5 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-black transition-colors duration-500 ease-in-out',
                     value === t.id
-                      ? 'bg-white/20 text-white dark:bg-neutral-900/15 dark:text-neutral-900'
-                      : 'bg-black/5 text-neutral-700 dark:bg-white/5 dark:text-neutral-200'
+                      ? 'bg-white/20 text-white dark:bg-emerald-900/15 dark:text-emerald-900'
+                      : 'bg-emerald-900/5 text-emerald-900 dark:bg-white/5 dark:text-emerald-100'
                   )}
                   aria-label={`${mealsCount} meals`}
                 >
@@ -75,9 +75,9 @@ export function MobileTabs(props: {
               {t.id === 'protein' && (
                 <span
                   className={cn(
-                    'ml-0.5 inline-flex min-w-9 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-black tabular-nums',
+                    'ml-0.5 inline-flex min-w-9 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-black tabular-nums transition-colors duration-500 ease-in-out',
                     value === t.id
-                      ? 'bg-white/20 text-white dark:bg-neutral-900/15 dark:text-neutral-900'
+                      ? 'bg-white/20 text-white dark:bg-emerald-900/15 dark:text-emerald-900'
                       : 'bg-emerald-600/10 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-200'
                   )}
                   aria-label={`Protein progress ${Math.round(progressPercent)} percent`}

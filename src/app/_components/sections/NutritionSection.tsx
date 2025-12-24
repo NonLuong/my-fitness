@@ -43,12 +43,12 @@ export function NutritionSection(props: {
       >
         <div className="flex items-end justify-between gap-3 px-1">
           <div>
-            <div className="text-[11px] font-semibold tracking-wide text-emerald-100/40">Nutrition</div>
-            <div className="text-lg font-extrabold tracking-tight text-white">Today&apos;s meals</div>
+            <div className="text-[11px] font-semibold tracking-wide text-emerald-900/40 dark:text-emerald-100/40 transition-colors duration-500 ease-in-out">Nutrition</div>
+            <div className="text-lg font-extrabold tracking-tight text-neutral-900 dark:text-white transition-colors duration-500 ease-in-out">Today&apos;s meals</div>
           </div>
           <button
             onClick={onOpenAi}
-            className="rounded-2xl bg-emerald-500 px-4 py-2 text-xs font-bold text-white shadow-[0_0_10px_rgba(16,185,129,0.4)] hover:bg-emerald-600 transition-colors"
+            className="rounded-2xl bg-emerald-500 px-4 py-2 text-xs font-bold text-white shadow-[0_0_10px_rgba(16,185,129,0.4)] hover:bg-emerald-600 transition-colors duration-500 ease-in-out"
           >
             Add meal
           </button>
@@ -58,38 +58,38 @@ export function NutritionSection(props: {
         <motion.div
           variants={fadeUp}
           transition={springy(prefersReducedMotion)}
-          className="rounded-3xl border border-white/5 bg-[#0a120f]/60 p-6 shadow-sm backdrop-blur-md transition will-change-transform hover:shadow-md"
+          className="rounded-3xl border border-emerald-900/5 dark:border-white/5 bg-white/60 dark:bg-[#0a120f]/60 p-6 shadow-sm backdrop-blur-md transition-all duration-500 ease-in-out will-change-transform hover:shadow-md"
         >
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-sm font-extrabold tracking-tight text-white">Today&apos;s Nutrition</div>
-              <div className="text-xs text-emerald-100/40">From saved meals (AI)</div>
+              <div className="text-sm font-extrabold tracking-tight text-neutral-900 dark:text-white">Today&apos;s Nutrition</div>
+              <div className="text-xs text-emerald-900/40 dark:text-emerald-100/40">From saved meals (AI)</div>
             </div>
-            <div className="inline-flex items-center rounded-full border border-white/5 bg-emerald-900/20 px-2.5 py-1 text-[11px] font-semibold text-white">
+            <div className="inline-flex items-center rounded-full border border-emerald-900/5 dark:border-white/5 bg-emerald-100/50 dark:bg-emerald-900/20 px-2.5 py-1 text-[11px] font-semibold text-neutral-900 dark:text-white">
               {meals.length} meals
             </div>
           </div>
 
           <div className="mt-6 grid grid-cols-4 gap-4 text-center">
-            <div className="rounded-2xl bg-emerald-500/10 px-2 py-3 border border-emerald-500/20">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">kcal</div>
-              <div className="text-xl font-black text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">{Math.round(kcalAnimated)}</div>
+            <div className="rounded-2xl bg-emerald-500/10 px-2 py-3 border border-emerald-500/20 transition-colors duration-500 ease-in-out">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 transition-colors duration-500 ease-in-out">kcal</div>
+              <div className="text-xl font-black text-emerald-600 dark:text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.5)] transition-colors duration-500 ease-in-out">{Math.round(kcalAnimated)}</div>
             </div>
-            <div className="rounded-2xl bg-emerald-900/20 px-2 py-3 border border-white/5">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-100/40">Protein</div>
-              <div className="text-xl font-black text-white">{Math.round(pAnimated)}</div>
+            <div className="rounded-2xl bg-emerald-100/50 dark:bg-emerald-900/20 px-2 py-3 border border-emerald-900/5 dark:border-white/5 transition-colors duration-500 ease-in-out">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-900/40 dark:text-emerald-100/40 transition-colors duration-500 ease-in-out">Protein</div>
+              <div className="text-xl font-black text-neutral-900 dark:text-white transition-colors duration-500 ease-in-out">{Math.round(pAnimated)}</div>
             </div>
-            <div className="rounded-2xl bg-emerald-900/20 px-2 py-3 border border-white/5">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-100/40">Carbs</div>
-              <div className="text-xl font-black text-white">{Math.round(cAnimated)}</div>
+            <div className="rounded-2xl bg-emerald-100/50 dark:bg-emerald-900/20 px-2 py-3 border border-emerald-900/5 dark:border-white/5 transition-colors duration-500 ease-in-out">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-900/40 dark:text-emerald-100/40 transition-colors duration-500 ease-in-out">Carbs</div>
+              <div className="text-xl font-black text-neutral-900 dark:text-white transition-colors duration-500 ease-in-out">{Math.round(cAnimated)}</div>
             </div>
-            <div className="rounded-2xl bg-emerald-900/20 px-2 py-3 border border-white/5">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-100/40">Fat</div>
-              <div className="text-xl font-black text-white">{Math.round(fAnimated)}</div>
+            <div className="rounded-2xl bg-emerald-100/50 dark:bg-emerald-900/20 px-2 py-3 border border-emerald-900/5 dark:border-white/5 transition-colors duration-500 ease-in-out">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-900/40 dark:text-emerald-100/40 transition-colors duration-500 ease-in-out">Fat</div>
+              <div className="text-xl font-black text-neutral-900 dark:text-white transition-colors duration-500 ease-in-out">{Math.round(fAnimated)}</div>
             </div>
           </div>
 
-          <div className="mt-4 text-xs text-emerald-100/40">
+          <div className="mt-4 text-xs text-emerald-900/40 dark:text-emerald-100/40 transition-colors duration-500 ease-in-out">
             Tip: Save meals from AI Nutrition (bottom-right) to build accurate day totals.
           </div>
         </motion.div>

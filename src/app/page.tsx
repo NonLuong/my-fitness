@@ -27,7 +27,9 @@ import {
   Weight,
   AlertTriangle,
   Lightbulb,
-  Leaf
+  Leaf,
+  Sun,
+  Moon,
 } from 'lucide-react';
 
 import { resolveExerciseDetailFromLabel } from '@/lib/exercises';
@@ -406,6 +408,48 @@ function FitnessApp() {
     if (typeof window === 'undefined') return false;
     return window.innerWidth < 768;
   });
+
+  // --- Theme Logic ---
+  const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>('system');
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    const saved = localStorage.getItem('theme_mode') as 'light' | 'dark' | 'system' | null;
+    if (saved) setThemeMode(saved);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    localStorage.setItem('theme_mode', themeMode);
+    
+    const root = document.documentElement;
+    const applyTheme = () => {
+      const isDark = 
+        themeMode === 'dark' || 
+        (themeMode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      
+      if (isDark) root.classList.add('dark');
+      else root.classList.remove('dark');
+    };
+
+    applyTheme();
+
+    if (themeMode === 'system') {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      mq.addEventListener('change', applyTheme);
+      return () => mq.removeEventListener('change', applyTheme);
+    }
+  }, [themeMode, mounted]);
+
+  const toggleTheme = () => {
+    if (themeMode === 'system') {
+      const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      setThemeMode(isSystemDark ? 'light' : 'dark');
+    } else {
+      setThemeMode(prev => prev === 'dark' ? 'light' : 'dark');
+    }
+  };
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 768);
@@ -1003,7 +1047,7 @@ function FitnessApp() {
   }, [activeTab, isMobile, prefersReducedMotion, aiOpen, selectedExerciseLabel]);
 
   return (
-    <div className="min-h-screen bg-[#050a08] text-white selection:bg-emerald-500/30 font-sans">
+    <div className="min-h-screen bg-emerald-50 dark:bg-[#050a08] text-neutral-900 dark:text-white selection:bg-emerald-500/30 font-sans transition-colors duration-500 ease-in-out">
       {/* 3D Ambient Background */}
       <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
         <motion.div 
@@ -1014,7 +1058,7 @@ function FitnessApp() {
             y: [0, 30, 0]
           }}
           transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
-          className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] rounded-full bg-emerald-900/20 blur-[120px]" 
+          className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] rounded-full bg-emerald-300/20 dark:bg-emerald-900/20 blur-[120px]" 
         />
         <motion.div 
           animate={{ 
@@ -1024,7 +1068,7 @@ function FitnessApp() {
             y: [0, 50, 0]
           }}
           transition={{ duration: 15, repeat: Infinity, ease: "easeInOut", delay: 2 }}
-          className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-green-900/20 blur-[120px]" 
+          className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-green-300/20 dark:bg-green-900/20 blur-[120px]" 
         />
         <motion.div 
           animate={{ 
@@ -1036,18 +1080,38 @@ function FitnessApp() {
       </div>
 
       {/* Header (Mobile Only) */}
-      <header className="md:hidden fixed top-0 inset-x-0 z-30 border-b border-white/5 bg-[#050a08]/80 backdrop-blur-xl">
+      <header className="md:hidden fixed top-0 inset-x-0 z-30 border-b border-emerald-900/5 dark:border-white/5 bg-emerald-50/80 dark:bg-[#050a08]/80 backdrop-blur-xl transition-colors duration-500 ease-in-out">
         <div className="max-w-md mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-xl bg-linear-to-br from-emerald-500 to-emerald-700 flex items-center justify-center shadow-[0_0_15px_rgba(16,185,129,0.3)]">
               <Activity className="w-5 h-5 text-white" />
             </div>
-            <span className="font-bold text-lg tracking-tight text-white">FitSync</span>
+            <span className="font-bold text-lg tracking-tight text-neutral-900 dark:text-white">FitSync</span>
           </div>
           <div className="flex items-center gap-3">
+             {/* Theme Toggles */}
+             <div className="flex items-center gap-1 bg-emerald-900/5 dark:bg-white/5 rounded-full p-1 border border-emerald-900/5 dark:border-white/5 backdrop-blur-sm">
+                <button
+                  onClick={toggleTheme}
+                  className="p-1.5 rounded-full text-emerald-900/60 dark:text-emerald-100/60 hover:text-emerald-900 dark:hover:text-white transition-colors relative overflow-hidden"
+                >
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.div
+                      key={themeMode === 'dark' ? 'dark' : 'light'}
+                      initial={{ y: -15, opacity: 0, rotate: -90 }}
+                      animate={{ y: 0, opacity: 1, rotate: 0 }}
+                      exit={{ y: 15, opacity: 0, rotate: 90 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      {themeMode === 'dark' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+                    </motion.div>
+                  </AnimatePresence>
+                </button>
+             </div>
+
              <button 
                 onClick={() => setConfirmResetOpen(true)}
-                className="p-2 rounded-full hover:bg-white/5 text-emerald-100/60 hover:text-white transition-colors"
+                className="p-2 rounded-full hover:bg-emerald-900/5 dark:hover:bg-white/5 text-emerald-900/60 dark:text-emerald-100/60 hover:text-emerald-900 dark:hover:text-white transition-colors"
              >
                 <RotateCw className="w-5 h-5" />
              </button>
@@ -1067,7 +1131,7 @@ function FitnessApp() {
             <div className="w-10 h-10 rounded-xl bg-linear-to-br from-emerald-500 to-emerald-700 flex items-center justify-center shadow-[0_0_15px_rgba(16,185,129,0.3)]">
               <Activity className="w-6 h-6 text-white" />
             </div>
-            <span className="font-bold text-xl tracking-tight text-white">FitSync</span>
+            <span className="font-bold text-xl tracking-tight text-neutral-900 dark:text-white">FitSync</span>
           </div>
 
           <div className="space-y-2">
@@ -1081,10 +1145,10 @@ function FitnessApp() {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id as 'workout' | 'nutrition' | 'protein')}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-200 ${
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-500 ease-in-out ${
                     isActive 
-                      ? 'bg-emerald-500/10 text-emerald-400 font-bold shadow-[0_0_15px_rgba(16,185,129,0.1)] border border-emerald-500/20' 
-                      : 'text-emerald-100/60 hover:bg-white/5 hover:text-white'
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold shadow-[0_0_15px_rgba(16,185,129,0.1)] border border-emerald-500/20' 
+                      : 'text-emerald-900/60 dark:text-emerald-100/60 hover:bg-emerald-900/5 dark:hover:bg-white/5 hover:text-neutral-900 dark:hover:text-white'
                   }`}
                 >
                   <tab.icon className={`w-5 h-5 ${isActive ? 'text-emerald-400 drop-shadow-[0_0_5px_rgba(16,185,129,0.5)]' : ''}`} />
@@ -1096,10 +1160,10 @@ function FitnessApp() {
 
             <button
               onClick={() => setActiveTab('coach')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-200 ${
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-500 ease-in-out ${
                 activeTab === 'coach'
-                  ? 'bg-emerald-500/10 text-emerald-400 font-bold shadow-[0_0_15px_rgba(16,185,129,0.1)] border border-emerald-500/20'
-                  : 'text-emerald-100/60 hover:bg-white/5 hover:text-white'
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold shadow-[0_0_15px_rgba(16,185,129,0.1)] border border-emerald-500/20'
+                  : 'text-emerald-900/60 dark:text-emerald-100/60 hover:bg-emerald-900/5 dark:hover:bg-white/5 hover:text-neutral-900 dark:hover:text-white'
               }`}
             >
               <Bot className={`w-5 h-5 ${activeTab === 'coach' ? 'text-emerald-400 drop-shadow-[0_0_5px_rgba(16,185,129,0.5)]' : ''}`} />
@@ -1108,10 +1172,34 @@ function FitnessApp() {
             </button>
           </div>
 
-          <div className="pt-6 mt-auto border-t border-white/5 space-y-3">
+          <div className="pt-6 mt-auto border-t border-emerald-900/5 dark:border-white/5 space-y-3">
+             {/* Theme Toggles Desktop */}
+             <div className="flex items-center justify-between p-1 bg-emerald-900/5 dark:bg-white/5 rounded-2xl border border-emerald-900/5 dark:border-white/5 mb-2">
+                <button
+                  onClick={toggleTheme}
+                  className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-emerald-900/60 dark:text-emerald-100/60 hover:text-emerald-900 dark:hover:text-white hover:bg-emerald-900/5 dark:hover:bg-white/5 transition-all group"
+                >
+                  <div className="relative w-4 h-4 overflow-hidden">
+                    <AnimatePresence mode="wait" initial={false}>
+                      <motion.div
+                        key={themeMode === 'dark' ? 'dark' : 'light'}
+                        initial={{ y: -15, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        exit={{ y: 15, opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="absolute inset-0"
+                      >
+                        {themeMode === 'dark' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+                      </motion.div>
+                    </AnimatePresence>
+                  </div>
+                  <span className="text-xs font-bold group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">{themeMode === 'dark' ? 'Dark Mode' : 'Light Mode'}</span>
+                </button>
+             </div>
+
              <button 
                 onClick={() => setConfirmResetOpen(true)}
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-emerald-100/60 hover:bg-red-500/10 hover:text-red-400 transition-colors"
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-emerald-900/60 dark:text-emerald-100/60 hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 transition-colors"
              >
                 <RotateCw className="w-5 h-5" />
                 <span className="font-medium">Reset Day</span>
@@ -1134,7 +1222,7 @@ function FitnessApp() {
               className="space-y-4"
             >
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold text-white">Today&apos;s Plan</h2>
+                <h2 className="text-xl font-bold text-neutral-900 dark:text-white">Today&apos;s Plan</h2>
                 <span className="text-xs font-medium text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded-lg border border-emerald-400/20 shadow-[0_0_10px_rgba(52,211,153,0.1)]">
                   {todaySchedule.title}
                 </span>
@@ -1152,40 +1240,40 @@ function FitnessApp() {
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: i * 0.05 }}
                       onClick={() => setSelectedExerciseLabel(ex)}
-                      className={`group relative overflow-hidden rounded-2xl border p-4 transition-all active:scale-[0.98] h-full backdrop-blur-md
+                      className={`group relative overflow-hidden rounded-2xl border p-4 transition-all duration-500 ease-in-out active:scale-[0.98] h-full backdrop-blur-md
                         ${done 
-                          ? 'bg-emerald-950/40 border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.1)]' 
-                          : 'bg-[#0a120f]/60 border-white/5 hover:border-white/10 hover:bg-[#0a120f]/80'
+                          ? 'bg-emerald-100/40 dark:bg-emerald-950/40 border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.1)]' 
+                          : 'bg-white/60 dark:bg-[#0a120f]/60 border-emerald-900/5 dark:border-white/5 hover:border-emerald-900/10 dark:hover:border-white/10 hover:bg-white/80 dark:hover:bg-[#0a120f]/80'
                         }`}
                     >
                       <div className="flex items-center gap-4 h-full">
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all shrink-0
                           ${done 
                             ? 'bg-emerald-500 border-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)]' 
-                            : 'border-white/10 bg-white/5 text-emerald-100/40'
+                            : 'border-emerald-900/10 dark:border-white/10 bg-emerald-900/5 dark:bg-white/5 text-emerald-900/40 dark:text-emerald-100/40'
                           }`}>
                           {done ? <CheckCircle2 className="w-5 h-5" /> : <span className="text-sm font-bold">{i + 1}</span>}
                         </div>
                         
                         <div className="flex-1 min-w-0">
-                          <h3 className={`font-bold text-base truncate transition-colors ${done ? 'text-emerald-400' : 'text-white'}`}>
+                          <h3 className={`font-bold text-base truncate transition-colors ${done ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-900 dark:text-white'}`}>
                             {ex}
                           </h3>
                           <div className="flex items-center gap-2 mt-1">
-                            <div className="h-1.5 flex-1 bg-neutral-800 rounded-full overflow-hidden">
+                            <div className="h-1.5 flex-1 bg-neutral-200 dark:bg-neutral-800 rounded-full overflow-hidden">
                               <motion.div 
                                 className="h-full bg-emerald-500 shadow-[0_0_10px_#10b981]"
                                 initial={{ width: 0 }}
                                 animate={{ width: `${(item.count / item.target) * 100}%` }}
                               />
                             </div>
-                            <span className="text-xs font-medium text-emerald-100/40 whitespace-nowrap">{item.count}/{item.target}</span>
+                            <span className="text-xs font-medium text-emerald-900/40 dark:text-emerald-100/40 whitespace-nowrap">{item.count}/{item.target}</span>
                           </div>
                         </div>
 
                         <button
                           onClick={(e) => { e.stopPropagation(); incrementExercise(ex); }}
-                          className="w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors border border-white/5 shrink-0"
+                          className="w-10 h-10 rounded-xl bg-emerald-900/5 dark:bg-white/5 hover:bg-emerald-900/10 dark:hover:bg-white/10 flex items-center justify-center text-neutral-900 dark:text-white transition-colors border border-emerald-900/5 dark:border-white/5 shrink-0"
                         >
                           <Plus className="w-5 h-5" />
                         </button>
@@ -1229,36 +1317,36 @@ function FitnessApp() {
               transition={{ duration: 0.2 }}
               className="space-y-4"
              >
-                <h2 className="text-xl font-bold text-white">Quick Add</h2>
+                <h2 className="text-xl font-bold text-neutral-900 dark:text-white">Quick Add</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {proteinItems.map((item, idx) => (
                     <button
                       key={idx}
                       onClick={() => addProtein({ label: item.label, grams: item.grams, category: item.category, calories: item.calories })}
-                      className="flex items-center gap-4 p-4 rounded-2xl border border-white/5 bg-[#0a120f]/60 hover:bg-[#0a120f]/80 transition-all group h-full backdrop-blur-md hover:border-emerald-500/20"
+                      className="flex items-center gap-4 p-4 rounded-2xl border border-emerald-900/5 dark:border-white/5 bg-white/60 dark:bg-[#0a120f]/60 hover:bg-white/80 dark:hover:bg-[#0a120f]/80 transition-all duration-500 ease-in-out group h-full backdrop-blur-md hover:border-emerald-500/20"
                     >
-                      <div className="w-12 h-12 rounded-2xl bg-emerald-950/30 flex items-center justify-center text-emerald-100/60 group-hover:text-emerald-400 group-hover:scale-110 transition-all shadow-inner shadow-black/20 border border-white/5 group-hover:border-emerald-500/20 group-hover:shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+                      <div className="w-12 h-12 rounded-2xl bg-emerald-100/50 dark:bg-emerald-950/30 flex items-center justify-center text-emerald-900/60 dark:text-emerald-100/60 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 group-hover:scale-110 transition-all shadow-inner shadow-black/5 dark:shadow-black/20 border border-emerald-900/5 dark:border-white/5 group-hover:border-emerald-500/20 group-hover:shadow-[0_0_15px_rgba(16,185,129,0.2)]">
                         <item.icon className="w-6 h-6" />
                       </div>
                       <div className="flex-1 text-left">
-                        <div className="font-bold text-white">{item.label}</div>
-                        <div className="text-xs text-emerald-100/40">{item.desc}</div>
+                        <div className="font-bold text-neutral-900 dark:text-white">{item.label}</div>
+                        <div className="text-xs text-emerald-900/40 dark:text-emerald-100/40">{item.desc}</div>
                       </div>
-                      <div className="text-emerald-400 font-bold text-lg drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">+{item.grams}g</div>
+                      <div className="text-emerald-600 dark:text-emerald-400 font-bold text-lg drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">+{item.grams}g</div>
                     </button>
                   ))}
                 </div>
 
-                <div className="pt-4 border-t border-white/10">
-                   <h3 className="text-sm font-bold text-emerald-100/40 mb-3">Recent Log</h3>
+                <div className="pt-4 border-t border-emerald-900/10 dark:border-white/10">
+                   <h3 className="text-sm font-bold text-emerald-900/40 dark:text-emerald-100/40 mb-3">Recent Log</h3>
                    <div className="space-y-2">
                       {proteinEvents.slice(0, 5).map(ev => (
-                         <div key={ev.id} className="flex items-center justify-between p-3 rounded-xl bg-[#0a120f]/40 border border-white/5 hover:border-emerald-500/20 transition-colors">
-                            <span className="text-sm text-emerald-100/80">{ev.label}</span>
-                            <span className="text-sm font-bold text-emerald-400">+{ev.grams}g</span>
+                         <div key={ev.id} className="flex items-center justify-between p-3 rounded-xl bg-white/40 dark:bg-[#0a120f]/40 border border-emerald-900/5 dark:border-white/5 hover:border-emerald-500/20 transition-colors duration-500 ease-in-out">
+                            <span className="text-sm text-emerald-900/80 dark:text-emerald-100/80">{ev.label}</span>
+                            <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">+{ev.grams}g</span>
                          </div>
                       ))}
-                      {proteinEvents.length === 0 && <div className="text-sm text-emerald-100/40 text-center py-4">No entries yet</div>}
+                      {proteinEvents.length === 0 && <div className="text-sm text-emerald-900/40 dark:text-emerald-100/40 text-center py-4">No entries yet</div>}
                    </div>
                 </div>
              </motion.div>
@@ -1277,22 +1365,22 @@ function FitnessApp() {
               {coachStep === 1 && (
                 <div className="space-y-6">
                   <div className="text-center">
-                    <h1 className="text-2xl font-bold text-white">Let&apos;s Start</h1>
-                    <p className="mt-2 text-sm text-emerald-100/60">Basic info for your plan</p>
+                    <h1 className="text-2xl font-bold text-neutral-900 dark:text-white">Let&apos;s Start</h1>
+                    <p className="mt-2 text-sm text-emerald-900/60 dark:text-emerald-100/60">Basic info for your plan</p>
                   </div>
 
-                  <div className="rounded-3xl border border-white/10 bg-[#0a120f]/60 p-6 backdrop-blur-md">
+                  <div className="rounded-3xl border border-emerald-900/10 dark:border-white/10 bg-white/60 dark:bg-[#0a120f]/60 p-6 backdrop-blur-md transition-colors duration-500 ease-in-out">
                     <div className="space-y-6">
                       <div className="space-y-3">
-                        <label className="text-sm font-bold text-white">Sex</label>
+                        <label className="text-sm font-bold text-neutral-900 dark:text-white">Sex</label>
                         <div className="grid grid-cols-2 gap-3">
                           <button
                             type="button"
                             onClick={() => setCoachProfile((p) => ({ ...p, sex: 'male' }))}
                             className={`flex flex-col items-center justify-center gap-2 rounded-2xl border-2 py-6 transition ${
                               coachProfile.sex === 'male'
-                                ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400'
-                                : 'border-transparent bg-white/5 text-emerald-100/40 hover:bg-white/10'
+                                ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                : 'border-transparent bg-emerald-900/5 dark:bg-white/5 text-emerald-900/40 dark:text-emerald-100/40 hover:bg-emerald-900/10 dark:hover:bg-white/10'
                             }`}
                           >
                             <User className="h-8 w-8" />
@@ -1303,8 +1391,8 @@ function FitnessApp() {
                             onClick={() => setCoachProfile((p) => ({ ...p, sex: 'female' }))}
                             className={`flex flex-col items-center justify-center gap-2 rounded-2xl border-2 py-6 transition ${
                               coachProfile.sex === 'female'
-                                ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400'
-                                : 'border-transparent bg-white/5 text-emerald-100/40 hover:bg-white/10'
+                                ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                : 'border-transparent bg-emerald-900/5 dark:bg-white/5 text-emerald-900/40 dark:text-emerald-100/40 hover:bg-emerald-900/10 dark:hover:bg-white/10'
                             }`}
                           >
                             <User className="h-8 w-8" />
@@ -1315,36 +1403,36 @@ function FitnessApp() {
 
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                         <label className="space-y-2">
-                          <div className="text-sm font-bold text-white">Age (Years)</div>
+                          <div className="text-sm font-bold text-neutral-900 dark:text-white">Age (Years)</div>
                           <input
                             inputMode="numeric"
                             placeholder="25"
                             value={draftProfile.ageYears}
                             onChange={(e) => setDraftProfile((d) => ({ ...d, ageYears: e.target.value }))}
                             onBlur={() => commitNumber('ageYears', draftProfile.ageYears, { min: 10, max: 90 })}
-                            className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-lg font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                            className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-lg font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                           />
                         </label>
                         <label className="space-y-2">
-                          <div className="text-sm font-bold text-white">Height (cm)</div>
+                          <div className="text-sm font-bold text-neutral-900 dark:text-white">Height (cm)</div>
                           <input
                             inputMode="numeric"
                             placeholder="170"
                             value={draftProfile.heightCm}
                             onChange={(e) => setDraftProfile((d) => ({ ...d, heightCm: e.target.value }))}
                             onBlur={() => commitNumber('heightCm', draftProfile.heightCm, { min: 120, max: 230 })}
-                            className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-lg font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                            className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-lg font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                           />
                         </label>
                         <label className="space-y-2">
-                          <div className="text-sm font-bold text-white">Weight (kg)</div>
+                          <div className="text-sm font-bold text-neutral-900 dark:text-white">Weight (kg)</div>
                           <input
                             inputMode="numeric"
                             placeholder="70"
                             value={draftProfile.weightKg}
                             onChange={(e) => setDraftProfile((d) => ({ ...d, weightKg: e.target.value }))}
                             onBlur={() => commitNumber('weightKg', draftProfile.weightKg, { min: 30, max: 250 })}
-                            className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-lg font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                            className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-lg font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                           />
                         </label>
                       </div>
@@ -1357,7 +1445,7 @@ function FitnessApp() {
                     className={`flex w-full items-center justify-center gap-2 rounded-2xl py-4 text-base font-bold transition ${
                       canSubmitCoach
                         ? 'bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] hover:bg-emerald-600'
-                        : 'cursor-not-allowed bg-white/5 text-emerald-100/20'
+                        : 'cursor-not-allowed bg-emerald-900/5 dark:bg-white/5 text-emerald-900/20 dark:text-emerald-100/20'
                     }`}
                   >
                     Next <ChevronRight className="h-5 w-5" />
@@ -1369,8 +1457,8 @@ function FitnessApp() {
               {coachStep === 2 && (
                 <div className="space-y-6">
                   <div className="text-center">
-                    <h1 className="text-2xl font-bold text-white">Activity Level</h1>
-                    <p className="mt-2 text-sm text-emerald-100/60">Helps calculate your metabolism</p>
+                    <h1 className="text-2xl font-bold text-neutral-900 dark:text-white">Activity Level</h1>
+                    <p className="mt-2 text-sm text-emerald-900/60 dark:text-emerald-100/60">Helps calculate your metabolism</p>
                   </div>
 
                   <div className="space-y-4">
@@ -1381,23 +1469,23 @@ function FitnessApp() {
                         className={`flex w-full items-center gap-4 rounded-2xl border p-4 text-left transition ${
                           coachProfile.activity === k
                             ? 'border-emerald-500 bg-emerald-500/10'
-                            : 'border-white/5 bg-[#0a120f]/60 hover:bg-white/5'
+                            : 'border-emerald-900/5 dark:border-white/5 bg-white/60 dark:bg-[#0a120f]/60 hover:bg-emerald-900/5 dark:hover:bg-white/5'
                         }`}
                       >
                         <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${
-                          coachProfile.activity === k ? 'bg-emerald-500 text-white' : 'bg-white/5 text-emerald-100/40'
+                          coachProfile.activity === k ? 'bg-emerald-500 text-white' : 'bg-emerald-900/5 dark:bg-white/5 text-emerald-900/40 dark:text-emerald-100/40'
                         }`}>
                           <Activity className="h-5 w-5" />
                         </div>
                         <div>
-                          <div className={`font-bold ${coachProfile.activity === k ? "text-emerald-400" : "text-white"}`}>
+                          <div className={`font-bold ${coachProfile.activity === k ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-900 dark:text-white"}`}>
                             {k === 'sedentary' && 'Sedentary'}
                             {k === 'light' && 'Lightly Active'}
                             {k === 'moderate' && 'Moderately Active'}
                             {k === 'active' && 'Very Active'}
                             {k === 'athlete' && 'Athlete'}
                           </div>
-                          <div className="text-xs text-emerald-100/40">{activityLabelTh(k as ActivityLevel)}</div>
+                          <div className="text-xs text-emerald-900/40 dark:text-emerald-100/40">{activityLabelTh(k as ActivityLevel)}</div>
                         </div>
                         {coachProfile.activity === k && <CheckCircle2 className="ml-auto h-5 w-5 text-emerald-500" />}
                       </button>
@@ -1407,7 +1495,7 @@ function FitnessApp() {
                   <div className="flex gap-3">
                     <button
                       onClick={prevCoachStep}
-                      className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-[#0a120f]/60 text-white transition hover:bg-white/5"
+                      className="flex h-14 w-14 items-center justify-center rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-white/60 dark:bg-[#0a120f]/60 text-neutral-900 dark:text-white transition hover:bg-emerald-900/5 dark:hover:bg-white/5"
                     >
                       <ChevronLeft className="h-6 w-6" />
                     </button>
@@ -1425,54 +1513,54 @@ function FitnessApp() {
               {coachStep === 3 && (
                 <div className="space-y-6">
                   <div className="text-center">
-                    <h1 className="text-2xl font-bold text-white">Body Stats</h1>
-                    <p className="mt-2 text-sm text-emerald-100/60">Optional, for body fat calculation</p>
+                    <h1 className="text-2xl font-bold text-neutral-900 dark:text-white">Body Stats</h1>
+                    <p className="mt-2 text-sm text-emerald-900/60 dark:text-emerald-100/60">Optional, for body fat calculation</p>
                   </div>
 
-                  <div className="rounded-3xl border border-white/10 bg-[#0a120f]/60 p-6 backdrop-blur-md">
+                  <div className="rounded-3xl border border-emerald-900/10 dark:border-white/10 bg-white/60 dark:bg-[#0a120f]/60 p-6 backdrop-blur-md transition-colors duration-500 ease-in-out">
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <label className="space-y-2">
-                        <div className="text-sm font-bold text-white">Waist (in)</div>
+                        <div className="text-sm font-bold text-neutral-900 dark:text-white">Waist (in)</div>
                         <input
                           inputMode="decimal"
                           placeholder="32"
                           value={draftProfile.waistIn}
                           onChange={(e) => setDraftProfile((d) => ({ ...d, waistIn: e.target.value }))}
                           onBlur={() => commitNumber('waistIn', draftProfile.waistIn, { min: 1, max: 90 })}
-                          className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                         />
                       </label>
                       <label className="space-y-2">
-                        <div className="text-sm font-bold text-white">Hip (in)</div>
+                        <div className="text-sm font-bold text-neutral-900 dark:text-white">Hip (in)</div>
                         <input
                           inputMode="decimal"
                           placeholder="38"
                           value={draftProfile.hipIn}
                           onChange={(e) => setDraftProfile((d) => ({ ...d, hipIn: e.target.value }))}
                           onBlur={() => commitNumber('hipIn', draftProfile.hipIn, { min: 1, max: 120 })}
-                          className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                         />
                       </label>
                       <label className="space-y-2">
-                        <div className="text-sm font-bold text-white">Chest (in)</div>
+                        <div className="text-sm font-bold text-neutral-900 dark:text-white">Chest (in)</div>
                         <input
                           inputMode="decimal"
                           placeholder="40"
                           value={draftProfile.chestIn}
                           onChange={(e) => setDraftProfile((d) => ({ ...d, chestIn: e.target.value }))}
                           onBlur={() => commitNumber('chestIn', draftProfile.chestIn, { min: 1, max: 120 })}
-                          className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                         />
                       </label>
                       <label className="space-y-2">
-                        <div className="text-sm font-bold text-white">Neck (in)</div>
+                        <div className="text-sm font-bold text-neutral-900 dark:text-white">Neck (in)</div>
                         <input
                           inputMode="decimal"
                           placeholder="15"
                           value={draftProfile.neckIn}
                           onChange={(e) => setDraftProfile((d) => ({ ...d, neckIn: e.target.value }))}
                           onBlur={() => commitNumber('neckIn', draftProfile.neckIn, { min: 1, max: 40 })}
-                          className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                         />
                       </label>
                     </div>
@@ -1481,7 +1569,7 @@ function FitnessApp() {
                   <div className="flex gap-3">
                     <button
                       onClick={prevCoachStep}
-                      className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-[#0a120f]/60 text-white transition hover:bg-white/5"
+                      className="flex h-14 w-14 items-center justify-center rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-white/60 dark:bg-[#0a120f]/60 text-neutral-900 dark:text-white transition hover:bg-emerald-900/5 dark:hover:bg-white/5"
                     >
                       <ChevronLeft className="h-6 w-6" />
                     </button>
@@ -1492,7 +1580,7 @@ function FitnessApp() {
                       Next <ChevronRight className="h-5 w-5" />
                     </button>
                   </div>
-                  <button onClick={nextCoachStep} className="mx-auto block text-xs font-bold text-emerald-100/40 hover:text-white">
+                  <button onClick={nextCoachStep} className="mx-auto block text-xs font-bold text-emerald-900/40 dark:text-emerald-100/40 hover:text-neutral-900 dark:hover:text-white">
                     Skip
                   </button>
                 </div>
@@ -1502,8 +1590,8 @@ function FitnessApp() {
               {coachStep === 4 && (
                 <div className="space-y-6">
                   <div className="text-center">
-                    <h1 className="text-2xl font-bold text-white">Your Goal</h1>
-                    <p className="mt-2 text-sm text-emerald-100/60">We&apos;ll help you get there</p>
+                    <h1 className="text-2xl font-bold text-neutral-900 dark:text-white">Your Goal</h1>
+                    <p className="mt-2 text-sm text-emerald-900/60 dark:text-emerald-100/60">We&apos;ll help you get there</p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -1513,8 +1601,8 @@ function FitnessApp() {
                         onClick={() => setCoachProfile((p) => ({ ...p, goal: g }))}
                         className={`flex flex-col items-center justify-center gap-2 rounded-2xl border p-4 transition ${
                           coachProfile.goal === g
-                            ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400'
-                            : 'border-white/5 bg-[#0a120f]/60 text-emerald-100/60 hover:bg-white/5 hover:text-white'
+                            ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                            : 'border-emerald-900/5 dark:border-white/5 bg-white/60 dark:bg-[#0a120f]/60 text-emerald-900/60 dark:text-emerald-100/60 hover:bg-emerald-900/5 dark:hover:bg-white/5 hover:text-neutral-900 dark:hover:text-white'
                         }`}
                       >
                         {g === 'lose_weight' && <Weight className="h-6 w-6" />}
@@ -1527,39 +1615,39 @@ function FitnessApp() {
                     ))}
                   </div>
 
-                  <div className="rounded-3xl border border-white/10 bg-[#0a120f]/60 p-6 backdrop-blur-md">
+                  <div className="rounded-3xl border border-emerald-900/10 dark:border-white/10 bg-white/60 dark:bg-[#0a120f]/60 p-6 backdrop-blur-md transition-colors duration-500 ease-in-out">
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <label className="space-y-2">
-                        <div className="text-sm font-bold text-white">Target Weight (kg)</div>
+                        <div className="text-sm font-bold text-neutral-900 dark:text-white">Target Weight (kg)</div>
                         <input
                           inputMode="decimal"
                           placeholder="Optional"
                           value={draftProfile.targetWeightKg}
                           onChange={(e) => setDraftProfile((d) => ({ ...d, targetWeightKg: e.target.value }))}
                           onBlur={() => commitNumber('targetWeightKg', draftProfile.targetWeightKg, { min: 30, max: 300 })}
-                          className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                         />
                       </label>
                       <label className="space-y-2">
-                        <div className="text-sm font-bold text-white">Duration (Weeks)</div>
+                        <div className="text-sm font-bold text-neutral-900 dark:text-white">Duration (Weeks)</div>
                         <input
                           inputMode="numeric"
                           placeholder="8"
                           value={draftProfile.targetWeeks}
                           onChange={(e) => setDraftProfile((d) => ({ ...d, targetWeeks: e.target.value }))}
                           onBlur={() => commitNumber('targetWeeks', draftProfile.targetWeeks, { min: 1, max: 52 })}
-                          className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                         />
                       </label>
                       <label className="space-y-2">
-                        <div className="text-sm font-bold text-white">Training Days/Week</div>
+                        <div className="text-sm font-bold text-neutral-900 dark:text-white">Training Days/Week</div>
                         <input
                           inputMode="numeric"
                           placeholder="3"
                           value={draftProfile.trainingDaysPerWeek}
                           onChange={(e) => setDraftProfile((d) => ({ ...d, trainingDaysPerWeek: e.target.value }))}
                           onBlur={() => commitNumber('trainingDaysPerWeek', draftProfile.trainingDaysPerWeek, { min: 0, max: 7 })}
-                          className="w-full rounded-2xl border border-white/10 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                         />
                       </label>
                     </div>
@@ -1568,7 +1656,7 @@ function FitnessApp() {
                   <div className="flex gap-3">
                     <button
                       onClick={prevCoachStep}
-                      className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-[#0a120f]/60 text-white transition hover:bg-white/5"
+                      className="flex h-14 w-14 items-center justify-center rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-white/60 dark:bg-[#0a120f]/60 text-neutral-900 dark:text-white transition hover:bg-emerald-900/5 dark:hover:bg-white/5"
                     >
                       <ChevronLeft className="h-6 w-6" />
                     </button>
@@ -1595,12 +1683,12 @@ function FitnessApp() {
                 <div className="space-y-6">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h1 className="text-2xl font-bold text-white">Coach Dashboard</h1>
-                      <p className="text-sm text-emerald-100/60">Your personalized plan</p>
+                      <h1 className="text-2xl font-bold text-neutral-900 dark:text-white">Coach Dashboard</h1>
+                      <p className="text-sm text-emerald-900/60 dark:text-emerald-100/60">Your personalized plan</p>
                     </div>
                     <button
                       onClick={() => setCoachStep(1)}
-                      className="rounded-full bg-white/5 px-4 py-2 text-xs font-bold text-emerald-100/60 transition hover:bg-white/10 hover:text-white"
+                      className="rounded-full bg-emerald-900/5 dark:bg-white/5 px-4 py-2 text-xs font-bold text-emerald-900/60 dark:text-emerald-100/60 transition hover:bg-emerald-900/10 dark:hover:bg-white/10 hover:text-neutral-900 dark:hover:text-white"
                     >
                       Edit Profile
                     </button>
@@ -1608,51 +1696,51 @@ function FitnessApp() {
 
                   {/* Stats Grid */}
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <div className="rounded-3xl bg-[#0a120f]/60 border border-white/5 p-4 backdrop-blur-md">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-100/40">BMI</div>
-                      <div className="mt-1 text-2xl font-extrabold text-white">{coachDerived.bmi.toFixed(1)}</div>
-                      <div className="text-xs font-medium text-emerald-400">{coachDerived.bmiCategory}</div>
+                    <div className="rounded-3xl bg-white/60 dark:bg-[#0a120f]/60 border border-emerald-900/5 dark:border-white/5 p-4 backdrop-blur-md transition-colors duration-500 ease-in-out">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-900/40 dark:text-emerald-100/40">BMI</div>
+                      <div className="mt-1 text-2xl font-extrabold text-neutral-900 dark:text-white">{coachDerived.bmi.toFixed(1)}</div>
+                      <div className="text-xs font-medium text-emerald-600 dark:text-emerald-400">{coachDerived.bmiCategory}</div>
                     </div>
-                    <div className="rounded-3xl bg-[#0a120f]/60 border border-white/5 p-4 backdrop-blur-md">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-100/40">TDEE</div>
-                      <div className="mt-1 text-2xl font-extrabold text-white">{round(coachDerived.tdee)}</div>
-                      <div className="text-xs text-emerald-100/40">kcal/day</div>
+                    <div className="rounded-3xl bg-white/60 dark:bg-[#0a120f]/60 border border-emerald-900/5 dark:border-white/5 p-4 backdrop-blur-md transition-colors duration-500 ease-in-out">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-900/40 dark:text-emerald-100/40">TDEE</div>
+                      <div className="mt-1 text-2xl font-extrabold text-neutral-900 dark:text-white">{round(coachDerived.tdee)}</div>
+                      <div className="text-xs text-emerald-900/40 dark:text-emerald-100/40">kcal/day</div>
                     </div>
                     <div className="rounded-3xl bg-emerald-500 p-4 text-white shadow-[0_0_15px_rgba(16,185,129,0.3)]">
                       <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-100">Target</div>
                       <div className="mt-1 text-2xl font-extrabold">{round(coachDerived.target)}</div>
                       <div className="text-xs text-emerald-100">kcal/day</div>
                     </div>
-                    <div className="rounded-3xl bg-[#0a120f]/60 border border-white/5 p-4 backdrop-blur-md">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-100/40">Protein</div>
-                      <div className="mt-1 text-xl font-extrabold text-white">{coachDerived.proteinRange[0]}-{coachDerived.proteinRange[1]}</div>
-                      <div className="text-xs text-emerald-100/40">g/day</div>
+                    <div className="rounded-3xl bg-white/60 dark:bg-[#0a120f]/60 border border-emerald-900/5 dark:border-white/5 p-4 backdrop-blur-md transition-colors duration-500 ease-in-out">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-900/40 dark:text-emerald-100/40">Protein</div>
+                      <div className="mt-1 text-xl font-extrabold text-neutral-900 dark:text-white">{coachDerived.proteinRange[0]}-{coachDerived.proteinRange[1]}</div>
+                      <div className="text-xs text-emerald-900/40 dark:text-emerald-100/40">g/day</div>
                     </div>
                   </div>
 
                   {/* Chat Interface */}
-                  <div className="flex h-[65vh] sm:h-150 flex-col overflow-hidden rounded-4xl border border-white/10 bg-[#0a120f]/60 shadow-2xl backdrop-blur-md">
-                    <div className="border-b border-white/5 bg-emerald-950/30 px-6 py-4">
+                  <div className="flex h-[65vh] sm:h-150 flex-col overflow-hidden rounded-4xl border border-emerald-900/10 dark:border-white/10 bg-white/60 dark:bg-[#0a120f]/60 shadow-2xl backdrop-blur-md transition-colors duration-500 ease-in-out">
+                    <div className="border-b border-emerald-900/5 dark:border-white/5 bg-emerald-50/50 dark:bg-emerald-950/30 px-6 py-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <div className="grid h-10 w-10 place-items-center rounded-full bg-emerald-500/20 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.2)]">
+                          <div className="grid h-10 w-10 place-items-center rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.2)]">
                             <Sparkles className="h-5 w-5" />
                           </div>
                           <div>
-                            <div className="text-sm font-bold text-white">AI Coach</div>
-                            <div className="text-xs text-emerald-100/40">Online 24/7</div>
+                            <div className="text-sm font-bold text-neutral-900 dark:text-white">AI Coach</div>
+                            <div className="text-xs text-emerald-900/40 dark:text-emerald-100/40">Online 24/7</div>
                           </div>
                         </div>
                         <button
                           onClick={resetCoachChat}
-                          className="rounded-full p-2 text-emerald-100/40 hover:bg-white/5 hover:text-white transition-colors"
+                          className="rounded-full p-2 text-emerald-900/40 dark:text-emerald-100/40 hover:bg-emerald-900/5 dark:hover:bg-white/5 hover:text-neutral-900 dark:hover:text-white transition-colors"
                         >
                           <RefreshCw className="h-5 w-5" />
                         </button>
                       </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-black/20">
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-emerald-50/30 dark:bg-black/20">
                       {coachMessages.map((m) => (
                         <div
                           key={m.id}
@@ -1662,11 +1750,11 @@ function FitnessApp() {
                             className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
                               m.role === 'user'
                                 ? 'bg-emerald-600 text-white shadow-[0_0_10px_rgba(5,150,105,0.3)]'
-                                : 'bg-[#1a2e26] text-emerald-50 border border-white/5'
+                                : 'bg-white dark:bg-[#1a2e26] text-neutral-900 dark:text-emerald-50 border border-emerald-900/5 dark:border-white/5'
                             }`}
                           >
                             {m.role === 'assistant' ? (
-                              <div className="coach-markdown prose prose-sm prose-invert max-w-none">
+                              <div className="coach-markdown prose prose-sm prose-neutral dark:prose-invert max-w-none">
                                 <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
                                   {m.text}
                                 </ReactMarkdown>
@@ -1679,7 +1767,7 @@ function FitnessApp() {
                       ))}
                       {coachSubmitting && (
                         <div className="flex justify-start">
-                          <div className="flex items-center gap-2 rounded-2xl bg-[#1a2e26] px-4 py-3 text-sm text-emerald-100/60 border border-white/5">
+                          <div className="flex items-center gap-2 rounded-2xl bg-white dark:bg-[#1a2e26] px-4 py-3 text-sm text-emerald-900/60 dark:text-emerald-100/60 border border-emerald-900/5 dark:border-white/5">
                             <Loader2 className="h-4 w-4 animate-spin" />
                             Typing...
                           </div>
@@ -1688,9 +1776,9 @@ function FitnessApp() {
                       <div ref={coachMessagesEndRef} />
                     </div>
 
-                    <div className="border-t border-white/5 bg-emerald-950/30 p-4">
+                    <div className="border-t border-emerald-900/5 dark:border-white/5 bg-emerald-50/50 dark:bg-emerald-950/30 p-4">
                       {coachApiError && (
-                        <div className="mb-2 text-xs font-medium text-rose-400 text-center">
+                        <div className="mb-2 text-xs font-medium text-rose-500 dark:text-rose-400 text-center">
                           {coachApiError}
                         </div>
                       )}
@@ -1700,7 +1788,7 @@ function FitnessApp() {
                             <button
                               key={q}
                               onClick={() => void sendToCoach(q)}
-                              className="whitespace-nowrap rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs font-bold text-emerald-400 transition hover:bg-emerald-500/20"
+                              className="whitespace-nowrap rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs font-bold text-emerald-600 dark:text-emerald-400 transition hover:bg-emerald-500/20"
                             >
                               {q}
                             </button>
@@ -1712,7 +1800,7 @@ function FitnessApp() {
                           value={coachDraft}
                           onChange={(e) => setCoachDraft(e.target.value)}
                           placeholder="Ask your coach..."
-                          className="flex-1 rounded-full border border-white/10 bg-black/40 px-4 py-3 text-sm font-medium text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 placeholder:text-emerald-100/20"
+                          className="flex-1 rounded-full border border-emerald-900/10 dark:border-white/10 bg-white dark:bg-black/40 px-4 py-3 text-sm font-medium text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 placeholder:text-emerald-900/30 dark:placeholder:text-emerald-100/20"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' && !e.shiftKey) {
                               e.preventDefault();
@@ -1743,19 +1831,19 @@ function FitnessApp() {
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="overflow-hidden rounded-4xl bg-[#0a120f]/80 border border-white/5 p-6 shadow-2xl sticky top-8 backdrop-blur-md"
+            className="overflow-hidden rounded-4xl bg-white/80 dark:bg-[#0a120f]/80 border border-emerald-900/5 dark:border-white/5 p-6 shadow-2xl sticky top-8 backdrop-blur-md transition-colors duration-500 ease-in-out"
           >
             <div className="absolute inset-0 bg-linear-to-br from-emerald-500/10 to-transparent" />
             
             <div className="relative z-10 flex flex-col items-center text-center">
-              <div className="mb-2 text-xs font-bold uppercase tracking-widest text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">Daily Goal</div>
+              <div className="mb-2 text-xs font-bold uppercase tracking-widest text-emerald-600 dark:text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">Daily Goal</div>
               <div className="relative w-40 h-40 mb-4 flex items-center justify-center">
                  {/* Progress Ring */}
                  <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                    <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="6" className="text-emerald-950" />
+                    <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="6" className="text-emerald-100 dark:text-emerald-950" />
                     <motion.circle 
                       cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="6" 
-                      className="text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.6)]"
+                      className="text-emerald-500 dark:text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.6)]"
                       strokeLinecap="round"
                       initial={{ pathLength: 0 }}
                       animate={{ pathLength: progress / 100 }}
@@ -1763,23 +1851,23 @@ function FitnessApp() {
                     />
                  </svg>
                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-4xl font-black tracking-tighter text-white drop-shadow-lg">{Math.round(proteinAnimated)}</span>
-                    <span className="text-xs font-medium text-emerald-100/40">/ 180g Protein</span>
+                    <span className="text-4xl font-black tracking-tighter text-neutral-900 dark:text-white drop-shadow-lg">{Math.round(proteinAnimated)}</span>
+                    <span className="text-xs font-medium text-emerald-900/40 dark:text-emerald-100/40">/ 180g Protein</span>
                  </div>
               </div>
               
-              <div className="grid grid-cols-3 gap-4 w-full border-t border-white/5 pt-4">
+              <div className="grid grid-cols-3 gap-4 w-full border-t border-emerald-900/5 dark:border-white/5 pt-4">
                  <div>
-                    <div className="text-[10px] text-emerald-100/40 uppercase tracking-wider">Kcal</div>
-                    <div className="text-lg font-bold text-white">{Math.round(kcalAnimated)}</div>
+                    <div className="text-[10px] text-emerald-900/40 dark:text-emerald-100/40 uppercase tracking-wider">Kcal</div>
+                    <div className="text-lg font-bold text-neutral-900 dark:text-white">{Math.round(kcalAnimated)}</div>
                  </div>
                  <div>
-                    <div className="text-[10px] text-emerald-100/40 uppercase tracking-wider">Carbs</div>
-                    <div className="text-lg font-bold text-white">{Math.round(cAnimated)}</div>
+                    <div className="text-[10px] text-emerald-900/40 dark:text-emerald-100/40 uppercase tracking-wider">Carbs</div>
+                    <div className="text-lg font-bold text-neutral-900 dark:text-white">{Math.round(cAnimated)}</div>
                  </div>
                  <div>
-                    <div className="text-[10px] text-emerald-100/40 uppercase tracking-wider">Fat</div>
-                    <div className="text-lg font-bold text-white">{Math.round(fAnimated)}</div>
+                    <div className="text-[10px] text-emerald-900/40 dark:text-emerald-100/40 uppercase tracking-wider">Fat</div>
+                    <div className="text-lg font-bold text-neutral-900 dark:text-white">{Math.round(fAnimated)}</div>
                  </div>
               </div>
             </div>
@@ -1790,7 +1878,7 @@ function FitnessApp() {
 
       {/* Floating Bottom Navigation (Mobile Only) */}
       <div className="md:hidden fixed bottom-6 inset-x-0 z-40 flex justify-center">
-        <div className="flex items-center gap-1 p-1.5 rounded-full bg-[#0a120f]/90 border border-white/10 backdrop-blur-xl shadow-2xl shadow-black/50">
+        <div className="flex items-center gap-1 p-1.5 rounded-full bg-white/90 dark:bg-[#0a120f]/90 border border-emerald-900/10 dark:border-white/10 backdrop-blur-xl shadow-2xl shadow-emerald-900/20 dark:shadow-black/50 transition-colors duration-500 ease-in-out">
           {[
             { id: 'workout', icon: Dumbbell, label: 'Workout' },
             { id: 'nutrition', icon: Utensils, label: 'Food' },
@@ -1802,8 +1890,8 @@ function FitnessApp() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as 'workout' | 'nutrition' | 'protein')}
-                className={`relative px-6 py-3 rounded-full flex items-center gap-2 transition-all duration-300 ${
-                  isActive ? 'text-white' : 'text-emerald-100/40 hover:text-white'
+                className={`relative px-6 py-3 rounded-full flex items-center gap-2 transition-all duration-500 ease-in-out ${
+                  isActive ? 'text-white' : 'text-emerald-900/40 dark:text-emerald-100/40 hover:text-emerald-900 dark:hover:text-white'
                 }`}
               >
                 {isActive && (
@@ -1845,15 +1933,15 @@ function FitnessApp() {
               exit={{ y: '100%' }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
               onClick={e => e.stopPropagation()}
-              className="w-full max-w-md bg-[#0a120f] border border-white/10 rounded-3xl overflow-hidden shadow-2xl"
+              className="w-full max-w-md bg-white dark:bg-[#0a120f] border border-emerald-900/10 dark:border-white/10 rounded-3xl overflow-hidden shadow-2xl transition-colors duration-500 ease-in-out"
             >
-               <div className="p-4 border-b border-white/10 flex justify-between items-center bg-emerald-950/30">
+               <div className="p-4 border-b border-emerald-900/10 dark:border-white/10 flex justify-between items-center bg-emerald-50 dark:bg-emerald-950/30 transition-colors duration-500 ease-in-out">
                   <div className="flex items-center gap-2">
-                     <Sparkles className="w-5 h-5 text-emerald-400" />
-                     <span className="font-bold text-white">AI Nutrition</span>
+                     <Sparkles className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                     <span className="font-bold text-emerald-900 dark:text-white transition-colors duration-500 ease-in-out">AI Nutrition</span>
                   </div>
-                  <button onClick={() => setAiOpen(false)} className="p-1 rounded-full hover:bg-white/10">
-                     <div className="w-6 h-1 bg-emerald-100/20 rounded-full" />
+                  <button onClick={() => setAiOpen(false)} className="p-1 rounded-full hover:bg-emerald-900/5 dark:hover:bg-white/10 transition-colors duration-500 ease-in-out">
+                     <div className="w-6 h-1 bg-emerald-900/20 dark:bg-emerald-100/20 rounded-full transition-colors duration-500 ease-in-out" />
                   </button>
                </div>
                
@@ -1862,7 +1950,7 @@ function FitnessApp() {
                     value={aiText}
                     onChange={(e) => setAiText(e.target.value)}
                     placeholder="Describe your meal..."
-                    className="w-full h-32 bg-emerald-950/30 border border-white/10 rounded-xl p-4 text-white placeholder:text-emerald-100/20 focus:outline-none focus:border-emerald-500/50 transition-colors resize-none"
+                    className="w-full h-32 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-900/10 dark:border-white/10 rounded-xl p-4 text-emerald-900 dark:text-white placeholder:text-emerald-900/40 dark:placeholder:text-emerald-100/20 focus:outline-none focus:border-emerald-500/50 transition-colors duration-500 ease-in-out resize-none"
                   />
                   
                   <div className="flex gap-3">
@@ -1885,44 +1973,44 @@ function FitnessApp() {
                   {aiResponse?.results && (
                      <div className="space-y-4 mt-4">
                         {aiResponse.results.map((r, i) => (
-                           <div key={i} className="bg-[#0a120f]/80 rounded-2xl p-5 border border-white/10 shadow-lg backdrop-blur-md">
+                           <div key={i} className="bg-white/80 dark:bg-[#0a120f]/80 rounded-2xl p-5 border border-emerald-900/10 dark:border-white/10 shadow-lg backdrop-blur-md transition-colors duration-500 ease-in-out">
                               {/* Header */}
                               <div className="flex justify-between items-start mb-4">
                                  <div>
-                                    <h3 className="text-lg font-black text-white tracking-tight">{r.itemName}</h3>
-                                    <p className="text-xs text-emerald-100/60">{r.assumedServing}</p>
+                                    <h3 className="text-lg font-black text-emerald-900 dark:text-white tracking-tight transition-colors duration-500 ease-in-out">{r.itemName}</h3>
+                                    <p className="text-xs text-emerald-900/60 dark:text-emerald-100/60 transition-colors duration-500 ease-in-out">{r.assumedServing}</p>
                                  </div>
                                  <div className="text-right">
-                                    <div className="text-2xl font-black text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.4)]">
+                                    <div className="text-2xl font-black text-emerald-500 dark:text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.4)] transition-colors duration-500 ease-in-out">
                                        {r.caloriesKcal}
                                     </div>
-                                    <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-100/40">kcal</div>
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-900/40 dark:text-emerald-100/40 transition-colors duration-500 ease-in-out">kcal</div>
                                  </div>
                               </div>
 
                               {/* Macros Grid */}
                               <div className="grid grid-cols-3 gap-2 mb-4">
-                                 <div className="bg-emerald-950/30 rounded-xl p-2 text-center border border-white/5">
-                                    <div className="text-[10px] text-emerald-100/40 uppercase font-bold">Protein</div>
-                                    <div className="text-lg font-bold text-white">{r.proteinG}g</div>
+                                 <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-xl p-2 text-center border border-emerald-900/5 dark:border-white/5 transition-colors duration-500 ease-in-out">
+                                    <div className="text-[10px] text-emerald-900/40 dark:text-emerald-100/40 uppercase font-bold transition-colors duration-500 ease-in-out">Protein</div>
+                                    <div className="text-lg font-bold text-emerald-900 dark:text-white transition-colors duration-500 ease-in-out">{r.proteinG}g</div>
                                  </div>
-                                 <div className="bg-emerald-950/30 rounded-xl p-2 text-center border border-white/5">
-                                    <div className="text-[10px] text-emerald-100/40 uppercase font-bold">Carbs</div>
-                                    <div className="text-lg font-bold text-white">{r.carbsG}g</div>
+                                 <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-xl p-2 text-center border border-emerald-900/5 dark:border-white/5 transition-colors duration-500 ease-in-out">
+                                    <div className="text-[10px] text-emerald-900/40 dark:text-emerald-100/40 uppercase font-bold transition-colors duration-500 ease-in-out">Carbs</div>
+                                    <div className="text-lg font-bold text-emerald-900 dark:text-white transition-colors duration-500 ease-in-out">{r.carbsG}g</div>
                                  </div>
-                                 <div className="bg-emerald-950/30 rounded-xl p-2 text-center border border-white/5">
-                                    <div className="text-[10px] text-emerald-100/40 uppercase font-bold">Fat</div>
-                                    <div className="text-lg font-bold text-white">{r.fatG}g</div>
+                                 <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-xl p-2 text-center border border-emerald-900/5 dark:border-white/5 transition-colors duration-500 ease-in-out">
+                                    <div className="text-[10px] text-emerald-900/40 dark:text-emerald-100/40 uppercase font-bold transition-colors duration-500 ease-in-out">Fat</div>
+                                    <div className="text-lg font-bold text-emerald-900 dark:text-white transition-colors duration-500 ease-in-out">{r.fatG}g</div>
                                  </div>
                               </div>
 
                               {/* Detailed Info */}
-                              <div className="space-y-3 border-t border-white/5 pt-3">
+                              <div className="space-y-3 border-t border-emerald-900/5 dark:border-white/5 pt-3 transition-colors duration-500 ease-in-out">
                                  {/* Vitamins */}
                                  {r.vitaminsAndMinerals && r.vitaminsAndMinerals.length > 0 && (
                                     <div className="flex flex-wrap gap-1.5">
                                        {r.vitaminsAndMinerals.map((v, idx) => (
-                                          <span key={idx} className="px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-300 text-[10px] font-bold border border-emerald-500/20">
+                                          <span key={idx} className="px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold border border-emerald-500/20 transition-colors duration-500 ease-in-out">
                                              {v}
                                           </span>
                                        ))}
