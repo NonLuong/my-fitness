@@ -584,7 +584,7 @@ function FitnessApp() {
                     if (!aiText.trim() && !aiImage) return;
                     void analyzeNutrition();
                   }}
-                  className="h-24 w-full resize-none rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm outline-none ring-0 focus:border-emerald-400/60 dark:border-white/10 dark:bg-neutral-900/60"
+                  className="h-24 w-full resize-none rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-base outline-none ring-0 focus:border-emerald-400/60 dark:border-white/10 dark:bg-neutral-900/60"
                 />
 
                 <div className="flex items-center justify-between gap-3">
@@ -742,7 +742,7 @@ function FitnessApp() {
                         <select
                           value={aiMealType}
                           onChange={(e) => setAiMealType(e.target.value as MealType)}
-                          className="rounded-2xl border border-black/10 bg-white/70 px-3 py-2 text-xs font-semibold text-neutral-800 outline-none dark:border-white/10 dark:bg-neutral-950/50 dark:text-neutral-100"
+                          className="rounded-2xl border border-black/10 bg-white/70 px-3 py-2 text-base font-semibold text-neutral-800 outline-none dark:border-white/10 dark:bg-neutral-950/50 dark:text-neutral-100"
                         >
                           <option value="breakfast">Breakfast</option>
                           <option value="lunch">Lunch</option>
