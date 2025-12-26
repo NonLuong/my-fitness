@@ -1359,7 +1359,7 @@ function FitnessApp() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2 }}
-              className="space-y-6"
+              className="space-y-6 pb-32 md:pb-0"
             >
               {/* Step 1: Basic Info */}
               {coachStep === 1 && (
@@ -2198,4 +2198,3 @@ function FitnessApp() {
 }
 
 export default dynamic(() => Promise.resolve(FitnessApp), { ssr: false });
-

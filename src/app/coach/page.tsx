@@ -551,7 +551,7 @@ export default function CoachPage() {
 
       <Header showBack maxWidthClass="max-w-3xl" />
 
-      <main className="mx-auto w-full max-w-3xl px-4 py-6">
+      <main className="mx-auto w-full max-w-3xl px-4 pt-6 pb-32 md:pb-6">
         <AnimatePresence mode="wait">
           {step === 1 && (
             <motion.div
