@@ -543,10 +543,10 @@ export default function CoachPage() {
     <div className="min-h-screen">
       {/* Background wash */}
       <div className="pointer-events-none fixed inset-0 -z-10">
-        <div className="absolute inset-0 bg-linear-to-b from-emerald-50 via-white to-white dark:from-neutral-950 dark:via-neutral-950 dark:to-neutral-950" />
-        <div className="absolute -left-32 -top-32 h-130 w-130 rounded-full bg-emerald-500/12 blur-3xl dark:bg-emerald-400/10" />
-        <div className="absolute -right-40 top-24 h-140 w-140 rounded-full bg-cyan-500/10 blur-3xl dark:bg-cyan-400/8" />
-        <div className="absolute inset-x-0 top-0 h-72 bg-[radial-gradient(ellipse_at_top,rgba(16,185,129,0.12),transparent_55%)] dark:bg-[radial-gradient(ellipse_at_top,rgba(16,185,129,0.10),transparent_60%)]" />
+        <div className="absolute inset-0 bg-linear-to-b from-white via-white to-white dark:from-neutral-950 dark:via-neutral-950 dark:to-neutral-950" />
+        <div className="absolute -left-32 -top-32 h-130 w-130 rounded-full bg-emerald-500/5 blur-3xl dark:bg-emerald-400/10" />
+        <div className="absolute -right-40 top-24 h-140 w-140 rounded-full bg-cyan-500/5 blur-3xl dark:bg-cyan-400/8" />
+        <div className="absolute inset-x-0 top-0 h-72 bg-[radial-gradient(ellipse_at_top,rgba(16,185,129,0.05),transparent_55%)] dark:bg-[radial-gradient(ellipse_at_top,rgba(16,185,129,0.10),transparent_60%)]" />
       </div>
 
       <Header showBack maxWidthClass="max-w-3xl" />

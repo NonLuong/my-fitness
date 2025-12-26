@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useRef, useState, useEffect } from 'react';
+import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
@@ -35,7 +35,6 @@ import {
 import { resolveExerciseDetailFromLabel } from '@/lib/exercises';
 
 import { ConfirmDialog } from './_components/ConfirmDialog';
-import { NutritionSection } from './_components/sections/NutritionSection';
 import type { MealEntry, MealType } from './_components/types/nutrition';
 
 // --- 1. Type Definition ---
@@ -96,6 +95,40 @@ type AiNutritionResponse = {
   reasoningSummary?: string;
   error?: string;
 };
+
+type NutritionSectionProps = {
+  mobileVisible: boolean;
+  prefersReducedMotion: boolean;
+  meals: MealEntry[];
+  kcalAnimated: number;
+  pAnimated: number;
+  cAnimated: number;
+  fAnimated: number;
+  onOpenAi: () => void;
+  onRequestDeleteMeal: (id: string) => void;
+};
+
+const NutritionSection = dynamic<NutritionSectionProps>(
+  () => import('./_components/sections/NutritionSection').then((mod) => mod.NutritionSection),
+  {
+    loading: () => <NutritionSectionSkeleton />,
+    ssr: false,
+  },
+);
+
+function parseWorkoutTarget(exerciseLabel: string) {
+  const m = /(\d+)x/i.exec(exerciseLabel);
+  if (!m) return 1;
+  const sets = Number(m[1]);
+  return Number.isFinite(sets) && sets > 0 ? sets : 1;
+}
+
+function makeWorkoutState(exercises: string[]): WorkoutState {
+  return exercises.reduce<WorkoutState>((acc, ex) => {
+    acc[ex] = { target: parseWorkoutTarget(ex), count: 0 };
+    return acc;
+  }, {});
+}
 
 // --- Coach Types & Helpers ---
 type Sex = 'male' | 'female';
@@ -392,6 +425,78 @@ const SCHEDULE: ScheduleType = {
   0: { title: "Sunday Reset", focus: "Deep Recovery", exercises: ["Sleep 8+ Hours", "Meal Prep", "Relaxation"] }
 };
 
+const AmbientBackground = React.memo(function AmbientBackground() {
+  return (
+    <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
+      <motion.div
+        animate={{
+          scale: [1, 1.2, 1],
+          opacity: [0.3, 0.5, 0.3],
+          x: [0, 50, 0],
+          y: [0, 30, 0],
+        }}
+        transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
+        className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] rounded-full bg-emerald-100/30 dark:bg-emerald-900/20 blur-[120px]"
+      />
+      <motion.div
+        animate={{
+          scale: [1, 1.1, 1],
+          opacity: [0.2, 0.4, 0.2],
+          x: [0, -30, 0],
+          y: [0, 50, 0],
+        }}
+        transition={{ duration: 15, repeat: Infinity, ease: 'easeInOut', delay: 2 }}
+        className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-emerald-100/30 dark:bg-green-900/20 blur-[120px]"
+      />
+      <motion.div
+        animate={{
+          opacity: [0.1, 0.3, 0.1],
+        }}
+        transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
+        className="absolute top-[30%] left-[30%] w-[40%] h-[40%] rounded-full bg-emerald-200/10 blur-[100px]"
+      />
+    </div>
+  );
+});
+AmbientBackground.displayName = 'AmbientBackground';
+
+const CoachMarkdownMessage = React.memo(function CoachMarkdownMessage({ text }: { text: string }) {
+  return (
+    <div className="coach-markdown prose prose-sm prose-neutral dark:prose-invert max-w-none">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
+});
+CoachMarkdownMessage.displayName = 'CoachMarkdownMessage';
+
+function NutritionSectionSkeleton() {
+  return (
+    <section className="space-y-4 animate-pulse">
+      <div className="flex items-center justify-between">
+        <div className="space-y-1">
+          <div className="h-3 w-20 rounded-full bg-emerald-900/10 dark:bg-emerald-100/10" />
+          <div className="h-4 w-32 rounded-full bg-emerald-900/20 dark:bg-emerald-100/20" />
+        </div>
+        <div className="h-9 w-24 rounded-2xl bg-emerald-500/40" />
+      </div>
+      <div className="rounded-3xl border border-emerald-900/5 dark:border-white/5 bg-white/40 dark:bg-[#0a120f]/40 p-6 space-y-4">
+        <div className="h-4 w-40 rounded-full bg-emerald-900/10 dark:bg-emerald-100/10" />
+        <div className="grid grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, idx) => (
+            <div key={idx} className="space-y-2 rounded-2xl border border-emerald-900/5 dark:border-white/5 p-3">
+              <div className="h-2.5 w-12 rounded-full bg-emerald-900/10 dark:bg-emerald-100/10" />
+              <div className="h-5 w-10 rounded-full bg-emerald-900/20 dark:bg-emerald-100/20" />
+            </div>
+          ))}
+        </div>
+        <div className="h-3 w-48 rounded-full bg-emerald-900/10 dark:bg-emerald-100/10" />
+      </div>
+    </section>
+  );
+}
+
 function FitnessApp() {
   // --- Logic ---
   const today = new Date();
@@ -462,20 +567,7 @@ function FitnessApp() {
     };
   }, []);
 
-  const parseWorkoutTarget = (exerciseLabel: string) => {
-    const m = /\((\d+)x/i.exec(exerciseLabel);
-    if (!m) return 1;
-    const sets = Number(m[1]);
-    return Number.isFinite(sets) && sets > 0 ? sets : 1;
-  };
-
-  const makeWorkoutState = (exercises: string[]): WorkoutState =>
-    exercises.reduce<WorkoutState>((acc, ex) => {
-      acc[ex] = { target: parseWorkoutTarget(ex), count: 0 };
-      return acc;
-    }, {});
-
-  const loadInitialData = () => {
+  const loadInitialData = useCallback(() => {
     if (typeof window === 'undefined') {
       return {
         protein: 0,
@@ -504,12 +596,13 @@ function FitnessApp() {
       workout: makeWorkoutState(todaySchedule.exercises),
       meals: [] as MealEntry[]
     };
-  };
+  }, [storageKey, todaySchedule]);
 
-  const [protein, setProtein] = useState<number>(() => loadInitialData().protein);
-  const [proteinEvents, setProteinEvents] = useState<ProteinEvent[]>(() => loadInitialData().proteinEvents);
-  const [workoutState, setWorkoutState] = useState<WorkoutState>(() => loadInitialData().workout);
-  const [meals, setMeals] = useState<MealEntry[]>(() => loadInitialData().meals);
+  const initialDailyLog = useMemo(() => loadInitialData(), [loadInitialData]);
+  const [protein, setProtein] = useState<number>(initialDailyLog.protein);
+  const [proteinEvents, setProteinEvents] = useState<ProteinEvent[]>(initialDailyLog.proteinEvents);
+  const [workoutState, setWorkoutState] = useState<WorkoutState>(initialDailyLog.workout);
+  const [meals, setMeals] = useState<MealEntry[]>(initialDailyLog.meals);
 
   const mealsRef = useRef<MealEntry[]>(meals);
   useEffect(() => {
@@ -1047,40 +1140,11 @@ function FitnessApp() {
   }, [activeTab, isMobile, prefersReducedMotion, aiOpen, selectedExerciseLabel]);
 
   return (
-    <div className="min-h-screen bg-emerald-50 dark:bg-[#050a08] text-neutral-900 dark:text-white selection:bg-emerald-500/30 font-sans transition-colors duration-500 ease-in-out">
-      {/* 3D Ambient Background */}
-      <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
-        <motion.div 
-          animate={{ 
-            scale: [1, 1.2, 1],
-            opacity: [0.3, 0.5, 0.3], 
-            x: [0, 50, 0],
-            y: [0, 30, 0]
-          }}
-          transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
-          className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] rounded-full bg-emerald-300/20 dark:bg-emerald-900/20 blur-[120px]" 
-        />
-        <motion.div 
-          animate={{ 
-            scale: [1, 1.1, 1],
-            opacity: [0.2, 0.4, 0.2], 
-            x: [0, -30, 0],
-            y: [0, 50, 0]
-          }}
-          transition={{ duration: 15, repeat: Infinity, ease: "easeInOut", delay: 2 }}
-          className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-green-300/20 dark:bg-green-900/20 blur-[120px]" 
-        />
-        <motion.div 
-          animate={{ 
-            opacity: [0.1, 0.3, 0.1], 
-          }}
-          transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
-          className="absolute top-[30%] left-[30%] w-[40%] h-[40%] rounded-full bg-emerald-500/5 blur-[100px]" 
-        />
-      </div>
+    <div className="min-h-screen bg-white dark:bg-[#050a08] text-neutral-900 dark:text-white selection:bg-emerald-500/30 font-sans transition-colors duration-500 ease-in-out">
+      <AmbientBackground />
 
       {/* Header (Mobile Only) */}
-      <header className="md:hidden fixed top-0 inset-x-0 z-30 border-b border-emerald-900/5 dark:border-white/5 bg-emerald-50/80 dark:bg-[#050a08]/80 backdrop-blur-xl transition-colors duration-500 ease-in-out">
+      <header className="md:hidden fixed top-0 inset-x-0 z-30 border-b border-emerald-900/5 dark:border-white/5 bg-white/80 dark:bg-[#050a08]/80 backdrop-blur-xl transition-colors duration-500 ease-in-out">
         <div className="max-w-md mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-xl bg-linear-to-br from-emerald-500 to-emerald-700 flex items-center justify-center shadow-[0_0_15px_rgba(16,185,129,0.3)]">
@@ -1410,7 +1474,7 @@ function FitnessApp() {
                             value={draftProfile.ageYears}
                             onChange={(e) => setDraftProfile((d) => ({ ...d, ageYears: e.target.value }))}
                             onBlur={() => commitNumber('ageYears', draftProfile.ageYears, { min: 10, max: 90 })}
-                            className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-lg font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                            className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-neutral-50 dark:bg-emerald-950/30 px-4 py-3 text-lg font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                           />
                         </label>
                         <label className="space-y-2">
@@ -1421,7 +1485,7 @@ function FitnessApp() {
                             value={draftProfile.heightCm}
                             onChange={(e) => setDraftProfile((d) => ({ ...d, heightCm: e.target.value }))}
                             onBlur={() => commitNumber('heightCm', draftProfile.heightCm, { min: 120, max: 230 })}
-                            className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-lg font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                            className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-neutral-50 dark:bg-emerald-950/30 px-4 py-3 text-lg font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                           />
                         </label>
                         <label className="space-y-2">
@@ -1432,7 +1496,7 @@ function FitnessApp() {
                             value={draftProfile.weightKg}
                             onChange={(e) => setDraftProfile((d) => ({ ...d, weightKg: e.target.value }))}
                             onBlur={() => commitNumber('weightKg', draftProfile.weightKg, { min: 30, max: 250 })}
-                            className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-lg font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                            className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-neutral-50 dark:bg-emerald-950/30 px-4 py-3 text-lg font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                           />
                         </label>
                       </div>
@@ -1527,7 +1591,7 @@ function FitnessApp() {
                           value={draftProfile.waistIn}
                           onChange={(e) => setDraftProfile((d) => ({ ...d, waistIn: e.target.value }))}
                           onBlur={() => commitNumber('waistIn', draftProfile.waistIn, { min: 1, max: 90 })}
-                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-neutral-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                         />
                       </label>
                       <label className="space-y-2">
@@ -1538,7 +1602,7 @@ function FitnessApp() {
                           value={draftProfile.hipIn}
                           onChange={(e) => setDraftProfile((d) => ({ ...d, hipIn: e.target.value }))}
                           onBlur={() => commitNumber('hipIn', draftProfile.hipIn, { min: 1, max: 120 })}
-                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-neutral-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                         />
                       </label>
                       <label className="space-y-2">
@@ -1549,7 +1613,7 @@ function FitnessApp() {
                           value={draftProfile.chestIn}
                           onChange={(e) => setDraftProfile((d) => ({ ...d, chestIn: e.target.value }))}
                           onBlur={() => commitNumber('chestIn', draftProfile.chestIn, { min: 1, max: 120 })}
-                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-neutral-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                         />
                       </label>
                       <label className="space-y-2">
@@ -1560,7 +1624,7 @@ function FitnessApp() {
                           value={draftProfile.neckIn}
                           onChange={(e) => setDraftProfile((d) => ({ ...d, neckIn: e.target.value }))}
                           onBlur={() => commitNumber('neckIn', draftProfile.neckIn, { min: 1, max: 40 })}
-                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-neutral-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                         />
                       </label>
                     </div>
@@ -1625,7 +1689,7 @@ function FitnessApp() {
                           value={draftProfile.targetWeightKg}
                           onChange={(e) => setDraftProfile((d) => ({ ...d, targetWeightKg: e.target.value }))}
                           onBlur={() => commitNumber('targetWeightKg', draftProfile.targetWeightKg, { min: 30, max: 300 })}
-                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-neutral-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                         />
                       </label>
                       <label className="space-y-2">
@@ -1636,7 +1700,7 @@ function FitnessApp() {
                           value={draftProfile.targetWeeks}
                           onChange={(e) => setDraftProfile((d) => ({ ...d, targetWeeks: e.target.value }))}
                           onBlur={() => commitNumber('targetWeeks', draftProfile.targetWeeks, { min: 1, max: 52 })}
-                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-neutral-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                         />
                       </label>
                       <label className="space-y-2">
@@ -1647,7 +1711,7 @@ function FitnessApp() {
                           value={draftProfile.trainingDaysPerWeek}
                           onChange={(e) => setDraftProfile((d) => ({ ...d, trainingDaysPerWeek: e.target.value }))}
                           onBlur={() => commitNumber('trainingDaysPerWeek', draftProfile.trainingDaysPerWeek, { min: 0, max: 7 })}
-                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          className="w-full rounded-2xl border border-emerald-900/10 dark:border-white/10 bg-neutral-50 dark:bg-emerald-950/30 px-4 py-3 text-sm font-bold text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                         />
                       </label>
                     </div>
@@ -1754,11 +1818,7 @@ function FitnessApp() {
                             }`}
                           >
                             {m.role === 'assistant' ? (
-                              <div className="coach-markdown prose prose-sm prose-neutral dark:prose-invert max-w-none">
-                                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
-                                  {m.text}
-                                </ReactMarkdown>
-                              </div>
+                              <CoachMarkdownMessage text={m.text} />
                             ) : (
                               <div className="whitespace-pre-wrap">{m.text}</div>
                             )}

@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { History, X, ChevronLeft, Utensils } from 'lucide-react';
 
@@ -32,6 +33,12 @@ export function NutritionSection(props: {
   } = props;
 
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setMounted(true), 0);
+    return () => clearTimeout(timer);
+  }, []);
 
   return (
     <>
@@ -95,9 +102,11 @@ export function NutritionSection(props: {
         </motion.div>
       </motion.section>
 
-      {/* Floating Trigger Button (Right Edge) */}
-      <button
-        onClick={() => setHistoryOpen(true)}
+      {mounted && createPortal(
+        <>
+          {/* Floating Trigger Button (Right Edge) */}
+          <button
+            onClick={() => setHistoryOpen(true)}
         className={`fixed right-0 top-1/2 z-30 flex -translate-y-1/2 flex-col items-center gap-1 rounded-l-2xl border-y border-l border-white/5 bg-[#0a120f]/80 py-3 pl-2 pr-1 shadow-lg backdrop-blur-xl transition-transform hover:bg-[#0a120f] hover:pr-2 active:scale-95 ${
           historyOpen ? 'translate-x-full' : 'translate-x-0'
         } ${mobileVisible ? '' : 'hidden md:flex'}`}
@@ -231,7 +240,10 @@ export function NutritionSection(props: {
             </motion.div>
           </>
         )}
-      </AnimatePresence>
+        </AnimatePresence>
+        </>,
+        document.body
+      )}
     </>
   );
 }
