@@ -35,6 +35,7 @@ import {
 import { resolveExerciseDetailFromLabel } from '@/lib/exercises';
 import { localDateKey, safeParseJson, sumFiniteNonNegative } from '@/lib/dailyLog';
 import { normalizeCoachMarkdown } from '@/lib/coachMarkdown';
+import { mealTypeFromDate } from '@/lib/mealTime';
 import {
   cloudErrorMessage,
   loadCloudCoachState,
@@ -55,7 +56,7 @@ import { ConfirmDialog } from './_components/ConfirmDialog';
 import { AuthButton } from './_components/AuthButton';
 import { useAuth } from './_components/AuthProvider';
 import { MochiMascot } from './_components/MochiMascot';
-import type { MealEntry, MealType } from './_components/types/nutrition';
+import type { MealEntry } from './_components/types/nutrition';
 
 // --- 1. Type Definition ---
 interface DailySchedule {
@@ -1092,7 +1093,6 @@ function FitnessApp() {
   const [aiLoading, setAiLoading] = useState<boolean>(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiResponse, setAiResponse] = useState<AiNutritionResponse | null>(null);
-  const [aiMealType] = useState<MealType>('lunch');
 
   useEffect(() => {
     if (!aiOpen) return;
@@ -1247,11 +1247,12 @@ function FitnessApp() {
 
   const saveAiAsMeal = () => {
     if (!aiResponse?.results || aiResponse.results.length === 0) return;
+    const savedAt = new Date();
 
     const newMeal: MealEntry = {
-      id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
-      ts: Date.now(),
-      mealType: aiMealType,
+      id: `${savedAt.getTime()}_${Math.random().toString(16).slice(2)}`,
+      ts: savedAt.getTime(),
+      mealType: mealTypeFromDate(savedAt),
       sourceText: aiText.trim() || undefined,
       items: aiResponse.results.map((r) => ({
         itemName: r.itemName,

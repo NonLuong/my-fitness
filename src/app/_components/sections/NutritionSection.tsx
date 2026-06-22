@@ -269,14 +269,6 @@ export function NutritionSection(props: {
                       <span>จำนวนมื้อทั้งหมด</span>
                       <span>{meals.length}</span>
                    </div>
-                   <button
-                     type="button"
-                     onClick={() => setHistoryOpen(false)}
-                     className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-[#8f765d]/12 bg-[#fffdf8] py-3 text-sm font-extrabold text-[#725f50] shadow-sm transition active:scale-[0.98] dark:border-white/10 dark:bg-white/8 dark:text-[#fff4df] sm:hidden"
-                   >
-                     <X className="h-4 w-4" />
-                     ปิดประวัติมื้ออาหาร
-                   </button>
                 </div>
               </div>
             </motion.div>
