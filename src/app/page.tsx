@@ -1403,7 +1403,7 @@ function FitnessApp() {
       </header>
 
       {/* Main Layout */}
-      <div className="max-w-7xl mx-auto p-4 md:p-8 pt-20 md:pt-8 grid grid-cols-1 md:grid-cols-12 gap-8">
+      <div className="mx-auto grid max-w-7xl grid-cols-1 gap-8 p-4 pb-[calc(12rem+env(safe-area-inset-bottom))] pt-20 md:grid-cols-12 md:p-8">
 
         {/* Desktop Navigation (Left Sidebar) */}
         <nav className="cozy-surface hidden md:flex md:col-span-3 lg:col-span-2 flex-col gap-6 sticky top-8 h-fit rounded-[2rem] p-4">
@@ -2239,8 +2239,8 @@ function FitnessApp() {
       </div>
 
       {/* Floating Bottom Navigation (Mobile Only) */}
-      <div className="md:hidden fixed bottom-6 inset-x-0 z-40 flex justify-center">
-        <div className="flex items-center gap-1 p-1.5 rounded-full bg-[#fffdf8]/92 dark:bg-[#443a32]/92 border border-[#8f765d]/12 dark:border-white/10 backdrop-blur-xl shadow-[0_14px_36px_rgba(105,82,57,0.16)] dark:shadow-black/30 transition-colors duration-500 ease-in-out">
+      <div className="fixed inset-x-0 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-40 flex justify-center px-4 md:hidden">
+        <div className="flex max-w-full items-center gap-1 rounded-full border border-[#8f765d]/12 bg-[#fffdf8]/92 p-1.5 shadow-[0_14px_36px_rgba(105,82,57,0.16)] backdrop-blur-xl transition-colors duration-500 ease-in-out dark:border-white/10 dark:bg-[#443a32]/92 dark:shadow-black/30">
           {[
             { id: 'workout', icon: Dumbbell, label: 'ออกกำลัง' },
             { id: 'nutrition', icon: Utensils, label: 'อาหาร' },
@@ -2251,7 +2251,7 @@ function FitnessApp() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as 'workout' | 'nutrition' | 'protein')}
-                className={`relative px-6 py-3 rounded-full flex items-center gap-2 transition-all duration-500 ease-in-out ${
+                className={`relative flex min-w-0 items-center gap-2 rounded-full px-5 py-3 transition-all duration-500 ease-in-out ${
                   isActive ? 'text-white' : 'text-emerald-900/40 dark:text-emerald-100/40 hover:text-emerald-900 dark:hover:text-white'
                 }`}
               >
@@ -2289,7 +2289,7 @@ function FitnessApp() {
             whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
             onClick={() => setCoachOpen(true)}
             aria-label="เปิดแชท AI Coach"
-            className="group fixed bottom-24 right-5 z-50 flex items-center gap-3 rounded-full bg-[#d98c68] p-3 text-white shadow-[0_14px_35px_rgba(177,105,75,0.3)] ring-4 ring-[#fff8ed]/85 transition-colors hover:bg-[#bd7454] dark:ring-[#342d27]/80 md:bottom-7 md:right-7"
+            className="group fixed bottom-[calc(7rem+env(safe-area-inset-bottom))] right-5 z-50 flex items-center gap-3 rounded-full bg-[#d98c68] p-3 text-white shadow-[0_14px_35px_rgba(177,105,75,0.3)] ring-4 ring-[#fff8ed]/85 transition-colors hover:bg-[#bd7454] dark:ring-[#342d27]/80 md:bottom-7 md:right-7"
           >
             <span className="hidden pl-2 text-sm font-extrabold md:block">ถาม AI Coach</span>
             <span className="relative grid h-10 w-10 place-items-center rounded-full bg-white/18">
@@ -2569,7 +2569,7 @@ function FitnessApp() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.94 }}
             transition={prefersReducedMotion ? { duration: 0 } : { type: 'spring', stiffness: 360, damping: 24 }}
-            className="pointer-events-none fixed bottom-28 left-1/2 z-70 w-[min(92vw,390px)] -translate-x-1/2 overflow-hidden rounded-[2rem] border border-[#8f765d]/12 bg-[#fffdf8]/96 p-4 shadow-[0_24px_60px_rgba(105,82,57,0.24)] backdrop-blur-xl dark:border-white/10 dark:bg-[#443a32]/96 md:bottom-8"
+            className="pointer-events-none fixed bottom-[calc(7.5rem+env(safe-area-inset-bottom))] left-1/2 z-70 w-[min(92vw,390px)] -translate-x-1/2 overflow-hidden rounded-[2rem] border border-[#8f765d]/12 bg-[#fffdf8]/96 p-4 shadow-[0_24px_60px_rgba(105,82,57,0.24)] backdrop-blur-xl dark:border-white/10 dark:bg-[#443a32]/96 md:bottom-8"
             role="status"
             aria-live="polite"
           >
@@ -2613,7 +2613,7 @@ function FitnessApp() {
                initial={{ opacity: 0, y: 50 }}
                animate={{ opacity: 1, y: 0 }}
                exit={{ opacity: 0, y: 50 }}
-               className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-white px-6 py-3 rounded-full shadow-lg font-bold flex items-center gap-2"
+               className="fixed bottom-[calc(7rem+env(safe-area-inset-bottom))] left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full bg-emerald-500 px-6 py-3 font-bold text-white shadow-lg md:bottom-24"
             >
                <CheckCircle2 className="w-5 h-5" />
                บันทึกเรียบร้อยแล้ว
@@ -2628,7 +2628,7 @@ function FitnessApp() {
                initial={{ opacity: 0, y: 50 }}
                animate={{ opacity: 1, y: 0 }}
                exit={{ opacity: 0, y: 50 }}
-               className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-white px-6 py-3 rounded-full shadow-lg font-bold flex items-center gap-2"
+               className="fixed bottom-[calc(7rem+env(safe-area-inset-bottom))] left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full bg-emerald-500 px-6 py-3 font-bold text-white shadow-lg md:bottom-24"
             >
                <CheckCircle2 className="w-5 h-5" />
                โค้ชอัปเดตคำแนะนำแล้ว
