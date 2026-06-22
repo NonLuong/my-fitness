@@ -25,6 +25,7 @@ import { localDateKey } from '@/lib/dailyLog';
 import {
   checkinStreak,
   emptyCheckinDraft,
+  storedCircumferenceToInches,
   weightChange,
   type CheckinDraft,
   type Mood,
@@ -42,6 +43,15 @@ type ProgressSectionProps = {
   mealCount: number;
   targetKcal: number;
   proteinGoal: number;
+};
+
+type ProgressInsight = {
+  headline: string;
+  summary: string;
+  positives: string[];
+  watchItems: string[];
+  nextSteps: string[];
+  safetyNote: string;
 };
 
 const MOODS: Array<{ id: Mood; emoji: string; label: string }> = [
@@ -145,6 +155,9 @@ export function ProgressSection(props: ProgressSectionProps) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [insight, setInsight] = useState<ProgressInsight | null>(null);
+  const [insightLoading, setInsightLoading] = useState(false);
+  const [insightError, setInsightError] = useState<string | null>(null);
   const [draft, setDraft] = useState<CheckinDraft>(() => emptyCheckinDraft(today));
 
   const refresh = useCallback(async () => {
@@ -174,12 +187,12 @@ export function ProgressSection(props: ProgressSectionProps) {
     setDraft((value) => ({
       ...value,
       weightKg: current.measurement?.weightKg?.toString() ?? '',
-      waistCm: current.measurement?.waistCm?.toString() ?? '',
-      chestCm: current.measurement?.chestCm?.toString() ?? '',
-      hipCm: current.measurement?.hipCm?.toString() ?? '',
-      armCm: current.measurement?.armCm?.toString() ?? '',
-      thighCm: current.measurement?.thighCm?.toString() ?? '',
-      neckCm: current.measurement?.neckCm?.toString() ?? '',
+      waistCm: storedCircumferenceToInches(current.measurement?.waistCm ?? null, 'waist')?.toString() ?? '',
+      chestCm: storedCircumferenceToInches(current.measurement?.chestCm ?? null, 'chest')?.toString() ?? '',
+      hipCm: storedCircumferenceToInches(current.measurement?.hipCm ?? null, 'hip')?.toString() ?? '',
+      armCm: storedCircumferenceToInches(current.measurement?.armCm ?? null, 'arm')?.toString() ?? '',
+      thighCm: storedCircumferenceToInches(current.measurement?.thighCm ?? null, 'thigh')?.toString() ?? '',
+      neckCm: storedCircumferenceToInches(current.measurement?.neckCm ?? null, 'neck')?.toString() ?? '',
       bodyFatPercent: current.measurement?.bodyFatPercent?.toString() ?? '',
       sleepHours: current.checkin?.sleepHours?.toString() ?? '',
       waterLiters: current.checkin?.waterMl ? (current.checkin.waterMl / 1000).toString() : '',
@@ -201,7 +214,8 @@ export function ProgressSection(props: ProgressSectionProps) {
 
   const visibleEntries = useMemo(() => entries.slice(0, range), [entries, range]);
   const latestWeight = entries.find((entry) => typeof entry.measurement?.weightKg === 'number')?.measurement?.weightKg ?? null;
-  const latestWaist = entries.find((entry) => typeof entry.measurement?.waistCm === 'number')?.measurement?.waistCm ?? null;
+  const latestWaistCm = entries.find((entry) => typeof entry.measurement?.waistCm === 'number')?.measurement?.waistCm ?? null;
+  const latestWaist = storedCircumferenceToInches(latestWaistCm, 'waist');
   const change = weightChange(entries);
   const streak = checkinStreak(entries, today);
   const calorieProgress = props.targetKcal > 0 ? Math.min((props.caloriesKcal / props.targetKcal) * 100, 100) : 0;
@@ -228,6 +242,50 @@ export function ProgressSection(props: ProgressSectionProps) {
       setError(saveError instanceof Error ? saveError.message : 'บันทึกไม่สำเร็จ');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const analyzeProgress = async () => {
+    if (!entries.length || insightLoading) return;
+    setInsightLoading(true);
+    setInsightError(null);
+    try {
+      const response = await fetch('/api/progress/insights', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          points: entries.slice(0, 30).reverse().map((entry) => ({
+            date: entry.date,
+            weightKg: entry.measurement?.weightKg ?? null,
+            waistIn: storedCircumferenceToInches(entry.measurement?.waistCm ?? null, 'waist'),
+            sleepHours: entry.checkin?.sleepHours ?? null,
+            waterLiters: entry.checkin?.waterMl ? entry.checkin.waterMl / 1000 : null,
+            energyLevel: entry.checkin?.energyLevel ?? null,
+            hungerLevel: entry.checkin?.hungerLevel ?? null,
+            mood: entry.checkin?.mood ?? null,
+          })),
+          nutrition: {
+            averageCaloriesKcal: props.caloriesKcal,
+            averageProteinG: props.proteinG,
+            targetCaloriesKcal: props.targetKcal,
+            targetProteinG: props.proteinGoal,
+            loggedDays: props.mealCount > 0 ? 1 : 0,
+          },
+        }),
+      });
+      const data = await response.json() as {
+        ok: boolean;
+        insight?: ProgressInsight;
+        error?: string;
+      };
+      if (!response.ok || !data.ok || !data.insight) {
+        throw new Error(data.error || 'AI วิเคราะห์ข้อมูลไม่สำเร็จ');
+      }
+      setInsight(data.insight);
+    } catch (analysisError) {
+      setInsightError(analysisError instanceof Error ? analysisError.message : 'AI วิเคราะห์ข้อมูลไม่สำเร็จ');
+    } finally {
+      setInsightLoading(false);
     }
   };
 
@@ -282,7 +340,7 @@ export function ProgressSection(props: ProgressSectionProps) {
         <div className="cozy-surface rounded-3xl p-4">
           <Ruler className="h-5 w-5 text-[#b28d59]" />
           <div className="mt-3 text-2xl font-black text-[#55483d] dark:text-[#fff4df]">{latestWaist ?? '—'}</div>
-          <div className="text-[10px] font-bold text-[#a18c79]">รอบเอวล่าสุด (ซม.)</div>
+          <div className="text-[10px] font-bold text-[#a18c79]">รอบเอวล่าสุด (นิ้ว)</div>
         </div>
         <div className="cozy-surface rounded-3xl p-4">
           <Sparkles className="h-5 w-5 text-[#d98c68]" />
@@ -290,6 +348,72 @@ export function ProgressSection(props: ProgressSectionProps) {
           <div className="text-[10px] font-bold text-[#a18c79]">บันทึกต่อเนื่อง (วัน)</div>
         </div>
       </div>
+
+      <section className="cozy-surface relative overflow-hidden rounded-[2rem] p-5">
+        <div className="absolute -right-10 -top-12 h-36 w-36 rounded-full bg-[#f4b89c]/20 blur-3xl" />
+        <div className="relative flex items-start justify-between gap-4">
+          <div className="flex gap-3">
+            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[#d98c68]/14 text-[#b66f50]">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="font-black text-[#55483d] dark:text-[#fff4df]">AI Progress Review</h3>
+              <p className="mt-0.5 text-[11px] text-[#a18c79]">
+                วิเคราะห์แนวโน้ม 30 วัน ไม่ตัดสินจากน้ำหนักวันเดียว
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={!entries.length || insightLoading}
+            onClick={analyzeProgress}
+            className="flex shrink-0 items-center gap-2 rounded-2xl bg-[#d98c68] px-4 py-2.5 text-xs font-extrabold text-white shadow-[0_8px_20px_rgba(177,105,75,0.18)] disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            {insightLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {insight ? 'วิเคราะห์ใหม่' : 'ให้ AI วิเคราะห์'}
+          </button>
+        </div>
+
+        {!entries.length && (
+          <p className="relative mt-4 rounded-2xl bg-[#f1e4cf]/45 p-3 text-xs text-[#8a725f] dark:bg-white/5 dark:text-[#d7c5aa]">
+            เริ่มบันทึกอย่างน้อยหนึ่งวันก่อน แล้ว AI จะช่วยดูภาพรวมให้ครับ
+          </p>
+        )}
+
+        {insight && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="relative mt-5 space-y-4 border-t border-[#8f765d]/10 pt-5"
+          >
+            <div>
+              <h4 className="text-lg font-black text-[#a96550] dark:text-[#f2b095]">{insight.headline}</h4>
+              <p className="mt-1 text-sm leading-relaxed text-[#6f5b4b] dark:text-[#e4d4bd]">{insight.summary}</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {[
+                { title: 'สิ่งที่กำลังไปได้ดี', items: insight.positives, color: 'bg-[#91ad8b]/12 text-[#66775f] dark:text-[#c7dfc0]' },
+                { title: 'สิ่งที่ควรสังเกต', items: insight.watchItems, color: 'bg-[#f2cd72]/18 text-[#82651f] dark:text-[#f5dfa0]' },
+                { title: 'ลองทำต่อไป', items: insight.nextSteps, color: 'bg-[#d98c68]/12 text-[#9d5d49] dark:text-[#f2b095]' },
+              ].map((group) => (
+                <div key={group.title} className={`rounded-2xl p-3 ${group.color}`}>
+                  <div className="text-xs font-black">{group.title}</div>
+                  <ul className="mt-2 space-y-1.5 text-[11px] leading-relaxed">
+                    {group.items.map((item) => <li key={item}>• {item}</li>)}
+                  </ul>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] leading-relaxed text-[#a18c79]">{insight.safetyNote}</p>
+          </motion.div>
+        )}
+
+        {insightError && (
+          <p className="relative mt-4 rounded-2xl bg-red-500/10 p-3 text-xs font-semibold text-red-600 dark:text-red-300">
+            {insightError}
+          </p>
+        )}
+      </section>
 
       <section className="cozy-surface rounded-[2rem] p-5">
         <div className="mb-4 flex items-center justify-between">
@@ -455,12 +579,12 @@ export function ProgressSection(props: ProgressSectionProps) {
                   </div>
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                     {metricInput('น้ำหนัก', 'กก.', 'weightKg', draft, setDraft)}
-                    {metricInput('รอบเอว', 'ซม.', 'waistCm', draft, setDraft)}
-                    {metricInput('รอบอก', 'ซม.', 'chestCm', draft, setDraft)}
-                    {metricInput('รอบสะโพก', 'ซม.', 'hipCm', draft, setDraft)}
-                    {metricInput('รอบแขน', 'ซม.', 'armCm', draft, setDraft)}
-                    {metricInput('รอบต้นขา', 'ซม.', 'thighCm', draft, setDraft)}
-                    {metricInput('รอบคอ', 'ซม.', 'neckCm', draft, setDraft)}
+                    {metricInput('รอบเอว', 'นิ้ว', 'waistCm', draft, setDraft)}
+                    {metricInput('รอบอก', 'นิ้ว', 'chestCm', draft, setDraft)}
+                    {metricInput('รอบสะโพก', 'นิ้ว', 'hipCm', draft, setDraft)}
+                    {metricInput('รอบแขน', 'นิ้ว', 'armCm', draft, setDraft)}
+                    {metricInput('รอบต้นขา', 'นิ้ว', 'thighCm', draft, setDraft)}
+                    {metricInput('รอบคอ', 'นิ้ว', 'neckCm', draft, setDraft)}
                     {metricInput('ไขมันร่างกาย', '%', 'bodyFatPercent', draft, setDraft)}
                   </div>
                 </div>
