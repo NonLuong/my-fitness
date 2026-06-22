@@ -8,17 +8,30 @@
 /* css-lsp-enable at-rule-no-unknown */
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-
-  /* Accent (used for focus rings / selection) */
-  --accent: 16 185 129; /* emerald-500 */
+  --background: #fff8ed;
+  --foreground: #55483d;
+  --cream: #fff8ed;
+  --paper: #fffdf8;
+  --oat: #f1e4cf;
+  --sage: #aab49a;
+  --sage-deep: #747b68;
+  --terracotta: #d98c68;
+  --butter: #f2cd72;
+  --peach: #f4b89c;
+  --cocoa: #55483d;
+  --accent: 113 136 106;
 }
 
 /* Class-based dark mode (used by the app's theme toggle) */
 .dark {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  --background: #342d27;
+  --foreground: #fff4df;
+  --cream: #342d27;
+  --paper: #443a32;
+  --oat: #5a4c40;
+  --sage: #a7bd9f;
+  --sage-deep: #c2d1b9;
+  --cocoa: #fff4df;
 }
 
 @theme inline {
@@ -28,20 +41,125 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial,
-    "Noto Sans", "Liberation Sans", sans-serif;
+  font-family: "Noto Sans Thai", "Leelawadee UI", ui-rounded, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
   transition: background-color 0.5s ease-in-out, color 0.5s ease-in-out;
 }
+
+.cozy-app {
+  background:
+    radial-gradient(circle at 8% 5%, rgba(244, 184, 156, 0.25), transparent 26rem),
+    radial-gradient(circle at 92% 14%, rgba(145, 173, 139, 0.24), transparent 28rem),
+    linear-gradient(145deg, #fffaf1 0%, #fff5e7 52%, #f8edda 100%);
+  color: var(--cocoa);
+}
+
+.dark .cozy-app {
+  background:
+    radial-gradient(circle at 10% 5%, rgba(217, 140, 104, 0.14), transparent 25rem),
+    radial-gradient(circle at 90% 12%, rgba(145, 173, 139, 0.12), transparent 30rem),
+    linear-gradient(145deg, #342d27 0%, #3c332c 55%, #2f2924 100%);
+}
+
+.cozy-surface {
+  border: 1px solid rgba(118, 94, 70, 0.11);
+  background: rgba(255, 253, 248, 0.8);
+  box-shadow: 0 14px 40px rgba(105, 82, 57, 0.09);
+  backdrop-filter: blur(18px);
+}
+
+.dark .cozy-surface {
+  border-color: rgba(255, 244, 223, 0.08);
+  background: rgba(68, 58, 50, 0.84);
+  box-shadow: 0 18px 46px rgba(28, 22, 18, 0.25);
+}
+
+/* Earth-tone compatibility layer for the former emerald vocabulary. */
+.cozy-app .bg-emerald-500 { background-color: #d98c68 !important; }
+.cozy-app .bg-emerald-600 { background-color: #bd7454 !important; }
+.cozy-app .bg-emerald-400 { background-color: #e2a184 !important; }
+.cozy-app .text-emerald-600,
+.cozy-app .text-emerald-500 { color: #b66f50 !important; }
+.cozy-app .text-emerald-700,
+.cozy-app .text-emerald-900 { color: #55483d !important; }
+.cozy-app .text-emerald-900\/80 { color: rgba(85, 72, 61, 0.82) !important; }
+.cozy-app .text-emerald-900\/60 { color: rgba(85, 72, 61, 0.68) !important; }
+.cozy-app .text-emerald-900\/50 { color: rgba(85, 72, 61, 0.58) !important; }
+.cozy-app .text-emerald-900\/40 { color: rgba(85, 72, 61, 0.5) !important; }
+.cozy-app .text-emerald-900\/30 { color: rgba(85, 72, 61, 0.4) !important; }
+.cozy-app .text-emerald-900\/20 { color: rgba(85, 72, 61, 0.3) !important; }
+.cozy-app .text-emerald-400,
+.cozy-app .text-emerald-300 { color: #c77d5d !important; }
+.cozy-app .border-emerald-500 { border-color: #d98c68 !important; }
+.cozy-app .border-emerald-500\/20,
+.cozy-app .border-emerald-500\/30 { border-color: rgba(185, 112, 80, 0.25) !important; }
+.cozy-app .border-emerald-500\/10,
+.cozy-app .border-emerald-500\/50,
+.cozy-app .border-emerald-400\/20 { border-color: rgba(185, 112, 80, 0.2) !important; }
+.cozy-app .bg-emerald-50 { background-color: #fff8ed !important; }
+.cozy-app .bg-emerald-50\/30,
+.cozy-app .bg-emerald-50\/50,
+.cozy-app .bg-emerald-50\/95 { background-color: rgba(255, 248, 237, 0.82) !important; }
+.cozy-app .bg-emerald-100\/50,
+.cozy-app .bg-emerald-100\/40,
+.cozy-app .bg-emerald-100\/30,
+.cozy-app .bg-emerald-100\/20,
+.cozy-app .bg-emerald-100\/10 { background-color: rgba(241, 228, 207, 0.64) !important; }
+.cozy-app .bg-emerald-500\/10,
+.cozy-app .bg-emerald-500\/20 { background-color: rgba(217, 140, 104, 0.15) !important; }
+.cozy-app .bg-emerald-400\/10,
+.cozy-app .bg-emerald-500\/30,
+.cozy-app .bg-emerald-500\/40 { background-color: rgba(217, 140, 104, 0.18) !important; }
+.cozy-app .bg-emerald-900\/5,
+.cozy-app .bg-emerald-900\/10 { background-color: rgba(85, 72, 61, 0.055) !important; }
+.cozy-app .bg-emerald-900\/15,
+.cozy-app .bg-emerald-900\/20,
+.cozy-app .bg-emerald-950\/30,
+.cozy-app .bg-emerald-950\/40,
+.cozy-app .bg-emerald-950\/90 { background-color: rgba(85, 72, 61, 0.12) !important; }
+.cozy-app .border-emerald-900\/5,
+.cozy-app .border-emerald-900\/10 { border-color: rgba(85, 72, 61, 0.11) !important; }
+.cozy-app .text-emerald-100,
+.cozy-app .text-emerald-100\/80,
+.cozy-app .text-emerald-100\/60,
+.cozy-app .text-emerald-100\/50,
+.cozy-app .text-emerald-100\/40,
+.cozy-app .text-emerald-100\/20 { color: #8a725f !important; }
+.cozy-app .focus\:border-emerald-500:focus,
+.cozy-app .focus\:border-emerald-500\/50:focus { border-color: #d98c68 !important; }
+.cozy-app .focus\:ring-emerald-500:focus { --tw-ring-color: rgba(217, 140, 104, 0.32) !important; }
+.cozy-app [class*="rgba(16,185,129"],
+.cozy-app [class*="rgba(52,211,153"],
+.cozy-app [class*="#10b981"],
+.cozy-app [class*="#34d399"] {
+  --tw-shadow-color: rgba(177, 105, 75, 0.2) !important;
+  box-shadow: 0 8px 22px rgba(177, 105, 75, 0.2) !important;
+  filter: none;
+}
+.cozy-app .text-neutral-900 { color: #55483d !important; }
+.cozy-app button:not(:disabled) { -webkit-tap-highlight-color: transparent; }
+
+.dark .cozy-app .text-neutral-900,
+.dark .cozy-app .text-emerald-900,
+.dark .cozy-app .text-emerald-700 { color: #fff4df !important; }
+.dark .cozy-app .text-emerald-900\/80 { color: rgba(255, 244, 223, 0.84) !important; }
+.dark .cozy-app .text-emerald-900\/60 { color: rgba(255, 244, 223, 0.7) !important; }
+.dark .cozy-app .text-emerald-900\/50 { color: rgba(255, 244, 223, 0.6) !important; }
+.dark .cozy-app .text-emerald-900\/40 { color: rgba(255, 244, 223, 0.5) !important; }
+.dark .cozy-app .text-emerald-900\/30 { color: rgba(255, 244, 223, 0.4) !important; }
+.dark .cozy-app .text-emerald-900\/20 { color: rgba(255, 244, 223, 0.3) !important; }
+.dark .cozy-app .text-emerald-100,
+.dark .cozy-app .text-emerald-100\/80,
+.dark .cozy-app .text-emerald-100\/60,
+.dark .cozy-app .text-emerald-100\/50,
+.dark .cozy-app .text-emerald-100\/40,
+.dark .cozy-app .text-emerald-100\/20 { color: #d7c5aa !important; }
+.dark .cozy-app .bg-\[\#0a120f\]\/60,
+.dark .cozy-app .bg-\[\#0a120f\]\/80,
+.dark .cozy-app .bg-\[\#1a2e26\] { background-color: rgba(68, 58, 50, 0.88) !important; }
 
 ::selection {
   background: rgba(var(--accent) / 0.18);
@@ -52,6 +170,57 @@ body {
   outline: 2px solid rgba(var(--accent) / 0.55);
   outline-offset: 3px;
   border-radius: 12px;
+}
+
+.coach-message-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(185, 112, 80, 0.38) transparent;
+}
+
+.coach-message-scroll::-webkit-scrollbar {
+  width: 7px;
+}
+
+.coach-message-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.coach-message-scroll::-webkit-scrollbar-thumb {
+  background: rgba(185, 112, 80, 0.32);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+.coach-message-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(185, 112, 80, 0.58);
+  background-clip: padding-box;
+}
+
+.nutrition-modal-scroll {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(185, 112, 80, 0.45) transparent;
+}
+
+.nutrition-modal-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.nutrition-modal-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.nutrition-modal-scroll::-webkit-scrollbar-thumb {
+  background: rgba(185, 112, 80, 0.4);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+.nutrition-modal-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(185, 112, 80, 0.68);
+  background-clip: padding-box;
 }
 
 /* Subtle grain to make glass UI feel more premium (very light) */

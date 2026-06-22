@@ -50,14 +50,14 @@ export function NutritionSection(props: {
       >
         <div className="flex items-end justify-between gap-3 px-1">
           <div>
-            <div className="text-[11px] font-semibold tracking-wide text-emerald-900/40 dark:text-emerald-100/40 transition-colors duration-500 ease-in-out">Nutrition</div>
-            <div className="text-lg font-extrabold tracking-tight text-neutral-900 dark:text-white transition-colors duration-500 ease-in-out">Today&apos;s meals</div>
+            <div className="text-[11px] font-semibold tracking-wide text-emerald-900/40 dark:text-emerald-100/40 transition-colors duration-500 ease-in-out">โภชนาการ</div>
+            <div className="text-lg font-extrabold tracking-tight text-neutral-900 dark:text-white transition-colors duration-500 ease-in-out">มื้ออาหารวันนี้</div>
           </div>
           <button
             onClick={onOpenAi}
             className="rounded-2xl bg-emerald-500 px-4 py-2 text-xs font-bold text-white shadow-[0_0_10px_rgba(16,185,129,0.4)] hover:bg-emerald-600 transition-colors duration-500 ease-in-out"
           >
-            Add meal
+            เพิ่มมื้ออาหาร
           </button>
         </div>
 
@@ -65,39 +65,40 @@ export function NutritionSection(props: {
         <motion.div
           variants={fadeUp}
           transition={springy(prefersReducedMotion)}
-          className="rounded-3xl border border-emerald-900/5 dark:border-white/5 bg-white/60 dark:bg-[#0a120f]/60 p-6 shadow-sm backdrop-blur-md transition-all duration-500 ease-in-out will-change-transform hover:shadow-md"
+          className="cozy-surface rounded-[2rem] p-6 transition-all duration-500 ease-in-out will-change-transform hover:-translate-y-0.5 hover:shadow-[0_16px_36px_rgba(105,82,57,0.12)]"
         >
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-sm font-extrabold tracking-tight text-neutral-900 dark:text-white">Today&apos;s Nutrition</div>
-              <div className="text-xs text-emerald-900/40 dark:text-emerald-100/40">From saved meals (AI)</div>
+              <div className="text-sm font-extrabold tracking-tight text-neutral-900 dark:text-white">สารอาหารรวมวันนี้</div>
+              <div className="text-xs text-emerald-900/40 dark:text-emerald-100/40">คำนวณจากมื้อที่บันทึกไว้</div>
             </div>
             <div className="inline-flex items-center rounded-full border border-emerald-900/5 dark:border-white/5 bg-emerald-100/50 dark:bg-emerald-900/20 px-2.5 py-1 text-[11px] font-semibold text-neutral-900 dark:text-white">
-              {meals.length} meals
+              {meals.length} มื้อ
             </div>
           </div>
 
-          <div className="mt-6 grid grid-cols-4 gap-4 text-center">
-            <div className="rounded-2xl bg-emerald-500/10 px-2 py-3 border border-emerald-500/20 transition-colors duration-500 ease-in-out">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 transition-colors duration-500 ease-in-out">kcal</div>
-              <div className="text-xl font-black text-emerald-600 dark:text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.5)] transition-colors duration-500 ease-in-out">{Math.round(kcalAnimated)}</div>
+          <div className="mt-6 grid grid-cols-2 gap-3 text-center sm:grid-cols-4">
+            <div className="rounded-2xl border border-[#d98c68]/20 bg-[#d98c68]/13 px-2 py-3 transition-colors duration-500">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[#b66f50] dark:text-[#f2b095]">พลังงาน</div>
+              <div className="text-xl font-black text-[#b66f50] dark:text-[#f2b095]">{Math.round(kcalAnimated)}</div>
+              <div className="text-[9px] font-bold text-[#b66f50]/60 dark:text-[#f2b095]/60">kcal</div>
             </div>
-            <div className="rounded-2xl bg-emerald-100/50 dark:bg-emerald-900/20 px-2 py-3 border border-emerald-900/5 dark:border-white/5 transition-colors duration-500 ease-in-out">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-900/40 dark:text-emerald-100/40 transition-colors duration-500 ease-in-out">Protein</div>
-              <div className="text-xl font-black text-neutral-900 dark:text-white transition-colors duration-500 ease-in-out">{Math.round(pAnimated)}</div>
+            <div className="rounded-2xl border border-[#8f765d]/14 bg-[#e5dfd1]/45 px-2 py-3 transition-colors duration-500">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[#725f50] dark:text-[#ddcbb1]">โปรตีน</div>
+              <div className="text-xl font-black text-[#655447] dark:text-[#f0dfc8]">{Math.round(pAnimated)}g</div>
             </div>
-            <div className="rounded-2xl bg-emerald-100/50 dark:bg-emerald-900/20 px-2 py-3 border border-emerald-900/5 dark:border-white/5 transition-colors duration-500 ease-in-out">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-900/40 dark:text-emerald-100/40 transition-colors duration-500 ease-in-out">Carbs</div>
-              <div className="text-xl font-black text-neutral-900 dark:text-white transition-colors duration-500 ease-in-out">{Math.round(cAnimated)}</div>
+            <div className="rounded-2xl border border-[#e3b950]/25 bg-[#f2cd72]/20 px-2 py-3 transition-colors duration-500">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[#9c7a28] dark:text-[#f2d88d]">คาร์บ</div>
+              <div className="text-xl font-black text-[#8b6b20] dark:text-[#f5dfa0]">{Math.round(cAnimated)}g</div>
             </div>
-            <div className="rounded-2xl bg-emerald-100/50 dark:bg-emerald-900/20 px-2 py-3 border border-emerald-900/5 dark:border-white/5 transition-colors duration-500 ease-in-out">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-900/40 dark:text-emerald-100/40 transition-colors duration-500 ease-in-out">Fat</div>
-              <div className="text-xl font-black text-neutral-900 dark:text-white transition-colors duration-500 ease-in-out">{Math.round(fAnimated)}</div>
+            <div className="rounded-2xl border border-[#e99b80]/25 bg-[#f4b89c]/20 px-2 py-3 transition-colors duration-500">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[#a96550] dark:text-[#f4c1aa]">ไขมัน</div>
+              <div className="text-xl font-black text-[#9d5d49] dark:text-[#f8cfbc]">{Math.round(fAnimated)}g</div>
             </div>
           </div>
 
           <div className="mt-4 text-xs text-emerald-900/40 dark:text-emerald-100/40 transition-colors duration-500 ease-in-out">
-            Tip: Save meals from AI Nutrition (bottom-right) to build accurate day totals.
+            เคล็ดลับ: บันทึกทุกมื้อจาก AI Nutrition เพื่อให้ยอดรวมแม่นยำขึ้น
           </div>
         </motion.div>
       </motion.section>
@@ -107,15 +108,15 @@ export function NutritionSection(props: {
           {/* Floating Trigger Button (Right Edge) */}
           <button
             onClick={() => setHistoryOpen(true)}
-        className={`fixed right-0 top-1/2 z-30 flex -translate-y-1/2 flex-col items-center gap-1 rounded-l-2xl border-y border-l border-white/5 bg-[#0a120f]/80 py-3 pl-2 pr-1 shadow-lg backdrop-blur-xl transition-transform hover:bg-[#0a120f] hover:pr-2 active:scale-95 ${
+        className={`fixed right-0 top-1/2 z-30 flex -translate-y-1/2 flex-col items-center gap-1 rounded-l-2xl border-y border-l border-[#8f765d]/10 bg-[#fff8ed]/90 py-3 pl-2 pr-1 shadow-lg backdrop-blur-xl transition-transform hover:bg-[#fffdf8] hover:pr-2 active:scale-95 dark:border-white/5 dark:bg-[#443a32]/90 dark:hover:bg-[#4d4137] ${
           historyOpen ? 'translate-x-full' : 'translate-x-0'
         } ${mobileVisible ? '' : 'hidden md:flex'}`}
       >
-        <History className="h-5 w-5 text-emerald-400" />
-        <span className="vertical-rl text-[10px] font-bold uppercase tracking-widest text-emerald-100/40" style={{ writingMode: 'vertical-rl' }}>
-          History
+        <History className="h-5 w-5 text-[#b66f50] dark:text-[#f2b095]" />
+        <span className="vertical-rl text-[10px] font-bold uppercase tracking-widest text-[#8a725f] dark:text-[#d7c5aa]" style={{ writingMode: 'vertical-rl' }}>
+          ประวัติ
         </span>
-        <ChevronLeft className="h-3 w-3 text-emerald-100/40" />
+        <ChevronLeft className="h-3 w-3 text-[#8a725f] dark:text-[#d7c5aa]" />
       </button>
 
       {/* Slide-over Drawer */}
@@ -137,7 +138,7 @@ export function NutritionSection(props: {
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed inset-y-0 right-0 z-50 w-full max-w-md border-l border-white/5 bg-[#0a120f]/95 shadow-2xl backdrop-blur-2xl"
+              className="fixed inset-y-0 right-0 z-50 w-full max-w-md border-l border-[#8f765d]/10 bg-[#fff8ed]/97 text-[#55483d] shadow-2xl backdrop-blur-2xl dark:border-white/5 dark:bg-[#443a32]/97 dark:text-[#fff4df]"
             >
               <div className="flex h-full flex-col">
                 {/* Drawer Header */}
@@ -147,8 +148,8 @@ export function NutritionSection(props: {
                       <Utensils className="h-5 w-5" />
                     </div>
                     <div>
-                      <h2 className="text-lg font-extrabold text-white">Meal History</h2>
-                      <p className="text-xs font-medium text-emerald-100/40">Today&apos;s timeline</p>
+                      <h2 className="text-lg font-extrabold text-[#55483d] dark:text-[#fff4df]">ประวัติมื้ออาหาร</h2>
+                      <p className="text-xs font-medium text-emerald-100/40">รายการของวันนี้</p>
                     </div>
                   </div>
                   <button
@@ -166,9 +167,9 @@ export function NutritionSection(props: {
                       <div className="mb-4 rounded-full bg-[#0a120f] p-4 border border-white/5">
                         <Utensils className="h-8 w-8 text-emerald-100/40" />
                       </div>
-                      <p className="text-sm font-medium text-emerald-100/40">No meals recorded today.</p>
+                      <p className="text-sm font-medium text-emerald-100/40">วันนี้ยังไม่มีมื้ออาหารที่บันทึกไว้</p>
                       <button onClick={() => { setHistoryOpen(false); onOpenAi(); }} className="mt-4 text-xs font-bold text-emerald-400 hover:underline">
-                        Add your first meal
+                        เพิ่มมื้อแรกของวันนี้
                       </button>
                     </div>
                   ) : (
@@ -219,7 +220,7 @@ export function NutritionSection(props: {
                                 onClick={() => onRequestDeleteMeal(m.id)}
                                 className="text-[11px] font-bold text-rose-500 transition hover:text-rose-600 hover:underline"
                               >
-                                Delete entry
+                                ลบรายการ
                               </button>
                             </div>
                           </motion.div>
@@ -232,7 +233,7 @@ export function NutritionSection(props: {
                 {/* Drawer Footer */}
                 <div className="border-t border-white/5 bg-emerald-950/30 px-6 py-4">
                    <div className="flex justify-between text-xs font-semibold text-emerald-100/40">
-                      <span>Total Items</span>
+                      <span>จำนวนมื้อทั้งหมด</span>
                       <span>{meals.length}</span>
                    </div>
                 </div>

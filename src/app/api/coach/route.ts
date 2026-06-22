@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenAI } from '@google/genai';
 import { parseGeminiJson } from '@/lib/geminiJson';
+import { checkRateLimit, contentLengthExceeds, getClientIp } from '@/lib/apiGuards';
+import { coachResponseSchema, createGeminiClient, getGeminiModelCandidates } from '@/lib/gemini';
+import { normalizeCoachMarkdown } from '@/lib/coachMarkdown';
 
 type Sex = 'male' | 'female';
 
@@ -42,11 +44,91 @@ type Derived = {
 
 type CoachRequestBody = {
   profile: CoachProfile;
-  derived: Derived;
   messages?: Array<{ role: 'user' | 'assistant'; text: string }>;
 };
 
 type CoachJson = { adviceMarkdown: string; notes?: string[]; followUpQuestions?: string[] };
+
+const ACTIVITY_MULTIPLIERS: Record<ActivityLevel, number> = {
+  sedentary: 1.2,
+  light: 1.375,
+  moderate: 1.55,
+  active: 1.725,
+  athlete: 1.9,
+};
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function bmiCategoryTh(bmi: number): string {
+  if (bmi < 18.5) return 'น้ำหนักต่ำกว่าเกณฑ์';
+  if (bmi < 23) return 'สมส่วน';
+  if (bmi < 25) return 'น้ำหนักเกิน';
+  if (bmi < 30) return 'อ้วนระดับ 1';
+  return 'อ้วนระดับ 2';
+}
+
+function deriveProfile(profile: CoachProfile): Derived {
+  const heightM = profile.heightCm / 100;
+  const bmi = profile.weightKg / (heightM * heightM);
+  const bmr = 10 * profile.weightKg + 6.25 * profile.heightCm - 5 * profile.ageYears
+    + (profile.sex === 'male' ? 5 : -161);
+  const tdee = bmr * ACTIVITY_MULTIPLIERS[profile.activity];
+  const targetMultiplier: Record<Goal, number> = {
+    lose_weight: 0.85,
+    lose_fat: 0.85,
+    maintain: 1,
+    gain_muscle: 1.08,
+    gain_weight: 1.12,
+  };
+  const proteinMin = profile.goal === 'gain_muscle' || profile.goal === 'lose_fat' ? 1.8 : 1.6;
+  const waistCm = profile.waistIn ? profile.waistIn * 2.54 : null;
+  const hipCm = profile.hipIn ? profile.hipIn * 2.54 : null;
+
+  return {
+    bmi,
+    bmiCategory: bmiCategoryTh(bmi),
+    healthyWeightKg: [18.5 * heightM * heightM, 24.9 * heightM * heightM],
+    bmr,
+    tdee,
+    target: clamp(tdee * targetMultiplier[profile.goal], 1200, 6000),
+    whr: waistCm && hipCm ? waistCm / hipCm : null,
+    whtr: waistCm ? waistCm / profile.heightCm : null,
+    proteinRange: [
+      Math.round(profile.weightKg * proteinMin),
+      Math.round(profile.weightKg * 2.2),
+    ],
+  };
+}
+
+function isFiniteInRange(value: unknown, min: number, max: number): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
+}
+
+function validateProfile(value: unknown): value is CoachProfile {
+  if (!value || typeof value !== 'object') return false;
+  const profile = value as Partial<CoachProfile>;
+  return (
+    (profile.sex === 'male' || profile.sex === 'female')
+    && isFiniteInRange(profile.ageYears, 10, 90)
+    && isFiniteInRange(profile.heightCm, 120, 230)
+    && isFiniteInRange(profile.weightKg, 30, 250)
+    && typeof profile.activity === 'string'
+    && profile.activity in ACTIVITY_MULTIPLIERS
+    && ['lose_weight', 'lose_fat', 'maintain', 'gain_muscle', 'gain_weight'].includes(String(profile.goal))
+    && (profile.trainingDaysPerWeek === undefined || isFiniteInRange(profile.trainingDaysPerWeek, 0, 7))
+    && (profile.waistIn === undefined || isFiniteInRange(profile.waistIn, 10, 100))
+    && (profile.hipIn === undefined || isFiniteInRange(profile.hipIn, 10, 100))
+    && (profile.chestIn === undefined || isFiniteInRange(profile.chestIn, 10, 100))
+    && (profile.neckIn === undefined || isFiniteInRange(profile.neckIn, 5, 40))
+    && (profile.armIn === undefined || isFiniteInRange(profile.armIn, 3, 40))
+    && (profile.thighIn === undefined || isFiniteInRange(profile.thighIn, 5, 60))
+    && (profile.goalDetail === undefined || (
+      typeof profile.goalDetail === 'string' && profile.goalDetail.length <= 1_000
+    ))
+  );
+}
 
 function tryExtractRetryAfterSeconds(message: string): number | null {
   // Common Gemini error includes: "Please retry in 48.76s" or "retryDelay":"48s"
@@ -100,11 +182,50 @@ function offlineCoachFallback(params: {
 
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as CoachRequestBody;
+    if (contentLengthExceeds(req, 64 * 1024)) {
+      return NextResponse.json({ ok: false, error: 'ข้อมูลคำขอมีขนาดใหญ่เกินไป' }, { status: 413 });
+    }
 
-    const { profile, derived } = body;
+    const rateLimit = checkRateLimit(`coach:${getClientIp(req)}`, {
+      limit: 15,
+      windowMs: 60_000,
+    });
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { ok: false, error: `ส่งคำขอถี่เกินไป กรุณาลองใหม่ใน ${rateLimit.retryAfterSeconds} วินาที` },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(rateLimit.retryAfterSeconds) },
+        },
+      );
+    }
 
-    const history = Array.isArray(body.messages) ? body.messages.slice(-24) : [];
+    let body: CoachRequestBody;
+    try {
+      body = (await req.json()) as CoachRequestBody;
+    } catch {
+      return NextResponse.json({ ok: false, error: 'รูปแบบ JSON ไม่ถูกต้อง' }, { status: 400 });
+    }
+    if (!validateProfile(body.profile)) {
+      return NextResponse.json(
+        { ok: false, error: 'ข้อมูลอายุ ส่วนสูง น้ำหนัก หรือเป้าหมายไม่ถูกต้อง' },
+        { status: 400 },
+      );
+    }
+
+    const profile = body.profile;
+    const derived = deriveProfile(profile);
+    const history = Array.isArray(body.messages)
+      ? body.messages
+          .filter((message) => (
+            message
+            && (message.role === 'user' || message.role === 'assistant')
+            && typeof message.text === 'string'
+          ))
+          .slice(-24)
+          .map((message) => ({ ...message, text: message.text.trim().slice(0, 2_000) }))
+          .filter((message) => message.text.length > 0)
+      : [];
 
     const systemStyle =
       'คุณคือโค้ชสุขภาพและฟิตเนสส่วนตัว ตอบเป็นภาษาไทยเท่านั้น โทนสุภาพ เป็นกันเอง ให้กำลังใจ\n'
@@ -130,7 +251,7 @@ export async function POST(req: Request) {
       });
     }
 
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const ai = createGeminiClient();
 
     // Keep prompt compact, friendly, and Thai-only.
     const prompt = `${systemStyle}
@@ -176,12 +297,7 @@ ${history.length ? history.map((m) => `- ${m.role === 'user' ? 'ผู้ใช�
 
     // Model availability can vary by project / API access. We'll try a small fallback chain.
     // Also: coach prompts can get large (history + profile). Keeping the response shorter helps avoid quota/rate limits.
-    const modelCandidates = [
-      process.env.GEMINI_MODEL,
-      'gemini-2.5-flash',
-      'gemini-2.5-flash-lite',
-      'gemini-2.0-flash',
-    ].filter(Boolean) as string[];
+    const modelCandidates = getGeminiModelCandidates();
 
     let resultText = '';
     let lastErr: unknown = null;
@@ -195,6 +311,7 @@ ${history.length ? history.map((m) => `- ${m.role === 'user' ? 'ผู้ใช�
               temperature: 0.2,
               maxOutputTokens: 4096,
               responseMimeType: 'application/json',
+              responseJsonSchema: coachResponseSchema,
             },
           });
           resultText = result.text ?? '';
@@ -269,6 +386,7 @@ ${history.length ? history.map((m) => `- ${m.role === 'user' ? 'ผู้ใช�
               temperature: 0,
               maxOutputTokens: 4096,
               responseMimeType: 'application/json',
+              responseJsonSchema: coachResponseSchema,
             },
           });
           repairText = repairResp.text ?? '';
@@ -310,7 +428,7 @@ ${history.length ? history.map((m) => `- ${m.role === 'user' ? 'ผู้ใช�
 
     return NextResponse.json({
       ok: true,
-  adviceMarkdown: parsed.value.adviceMarkdown,
+      adviceMarkdown: normalizeCoachMarkdown(parsed.value.adviceMarkdown),
       summary: {
         bmi: derived.bmi,
         bmiCategoryTh: derived.bmiCategory,

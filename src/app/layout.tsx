@@ -2,15 +2,13 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Fitness App",
-  description: "A comprehensive fitness tracking application",
+  title: "FitSync",
+  description: "ติดตามการออกกำลังกาย โภชนาการ และรับคำแนะนำจาก AI Coach",
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
 };
 
 export default function RootLayout({
@@ -19,7 +17,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="th">
       <body
         className="antialiased"
       >
