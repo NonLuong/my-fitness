@@ -29,6 +29,7 @@ import {
   Leaf,
   Sun,
   Moon,
+  ChartLine,
 } from 'lucide-react';
 
 import { resolveExerciseDetailFromLabel } from '@/lib/exercises';
@@ -127,8 +128,26 @@ type NutritionSectionProps = {
   onRequestDeleteMeal: (id: string) => void;
 };
 
+type ProgressSectionProps = {
+  caloriesKcal: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+  mealCount: number;
+  targetKcal: number;
+  proteinGoal: number;
+};
+
 const NutritionSection = dynamic<NutritionSectionProps>(
   () => import('./_components/sections/NutritionSection').then((mod) => mod.NutritionSection),
+  {
+    loading: () => <NutritionSectionSkeleton />,
+    ssr: false,
+  },
+);
+
+const ProgressSection = dynamic<ProgressSectionProps>(
+  () => import('./_components/sections/ProgressSection').then((mod) => mod.ProgressSection),
   {
     loading: () => <NutritionSectionSkeleton />,
     ssr: false,
@@ -649,13 +668,13 @@ function FitnessApp() {
     mealsRef.current = meals;
   }, [meals]);
 
-  const [activeTab, setActiveTab] = useState<'workout' | 'nutrition' | 'protein'>('workout');
+  const [activeTab, setActiveTab] = useState<'workout' | 'nutrition' | 'protein' | 'progress'>('workout');
   const [coachOpen, setCoachOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const saved = window.localStorage.getItem(MOBILE_TAB_STORAGE_KEY);
-    if (saved === 'workout' || saved === 'nutrition' || saved === 'protein') {
+    if (saved === 'workout' || saved === 'nutrition' || saved === 'protein' || saved === 'progress') {
       setActiveTab(saved);
     } else if (saved === 'coach') {
       setCoachOpen(true);
@@ -1422,12 +1441,13 @@ function FitnessApp() {
               { id: 'workout', icon: Dumbbell, label: 'ออกกำลังกาย' },
               { id: 'nutrition', icon: Utensils, label: 'โภชนาการ' },
               { id: 'protein', icon: Zap, label: 'เพิ่มโปรตีน' },
+              { id: 'progress', icon: ChartLine, label: 'ความก้าวหน้า' },
             ].map((tab) => {
               const isActive = activeTab === tab.id;
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as 'workout' | 'nutrition' | 'protein')}
+                  onClick={() => setActiveTab(tab.id as 'workout' | 'nutrition' | 'protein' | 'progress')}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-500 ease-in-out ${
                     isActive 
                       ? 'border border-[#d98c68]/25 bg-[#d98c68]/12 font-bold text-[#a96550] shadow-[0_8px_20px_rgba(177,105,75,0.1)] dark:text-[#f2b095]'
@@ -1677,6 +1697,26 @@ function FitnessApp() {
                    </div>
                 </div>
              </motion.div>
+          )}
+
+          {activeTab === 'progress' && (
+            <motion.div
+              key="progress"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 16 }}
+              transition={{ duration: 0.2 }}
+            >
+              <ProgressSection
+                caloriesKcal={mealTotals.caloriesKcal}
+                proteinG={totalProtein}
+                carbsG={mealTotals.carbsG}
+                fatG={mealTotals.fatG}
+                mealCount={meals.length}
+                targetKcal={coachDerived.target}
+                proteinGoal={proteinGoal}
+              />
+            </motion.div>
           )}
 
           </AnimatePresence>
@@ -2245,13 +2285,14 @@ function FitnessApp() {
             { id: 'workout', icon: Dumbbell, label: 'ออกกำลัง' },
             { id: 'nutrition', icon: Utensils, label: 'อาหาร' },
             { id: 'protein', icon: Zap, label: 'โปรตีน' },
+            { id: 'progress', icon: ChartLine, label: 'สถิติ' },
           ].map((tab) => {
             const isActive = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as 'workout' | 'nutrition' | 'protein')}
-                className={`relative flex min-w-0 items-center gap-2 rounded-full px-5 py-3 transition-all duration-500 ease-in-out ${
+                onClick={() => setActiveTab(tab.id as 'workout' | 'nutrition' | 'protein' | 'progress')}
+                className={`relative flex min-w-0 items-center gap-2 rounded-full px-3.5 py-3 transition-all duration-500 ease-in-out ${
                   isActive ? 'text-white' : 'text-emerald-900/40 dark:text-emerald-100/40 hover:text-emerald-900 dark:hover:text-white'
                 }`}
               >
