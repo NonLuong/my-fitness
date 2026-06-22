@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Sun, Moon, Monitor, ArrowLeft } from 'lucide-react';
 import { cn } from '@/app/_components/utils/cn';
 import { MochiMascot } from '@/app/_components/MochiMascot';
+import { AuthButton } from '@/app/_components/AuthButton';
 
 type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -106,6 +107,7 @@ export function Header({ showBack, className, maxWidthClass = "max-w-6xl" }: Hea
         </div>
 
         <div className="flex items-center gap-3">
+          <AuthButton compact />
           {/* Theme Toggle */}
           <div className="flex items-center bg-[#f1e4cf]/70 dark:bg-white/5 rounded-full p-1 border border-[#8f765d]/10 dark:border-white/5">
             {[
