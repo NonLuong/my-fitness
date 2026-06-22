@@ -2,7 +2,8 @@
 
 import { AnimatePresence, motion } from 'framer-motion';
 import { LogIn, LogOut, Mail, UserRound, X } from 'lucide-react';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 
@@ -20,6 +21,22 @@ export function AuthButton({ compact = false }: { compact?: boolean }) {
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', closeOnEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [open]);
 
   const displayName = user?.user_metadata?.full_name
     || user?.user_metadata?.name
@@ -109,13 +126,14 @@ export function AuthButton({ compact = false }: { compact?: boolean }) {
         </span>
       </button>
 
-      <AnimatePresence>
-        {open && (
-          <motion.div
+      {typeof document !== 'undefined' && createPortal(
+        <AnimatePresence>
+          {open && (
+            <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] grid place-items-center bg-[#342d27]/45 p-4 backdrop-blur-sm"
+            className="fixed inset-0 z-[100] grid min-h-[100dvh] place-items-center overflow-y-auto bg-[#342d27]/45 p-4 backdrop-blur-sm"
             onClick={() => setOpen(false)}
           >
             <motion.div
@@ -126,7 +144,7 @@ export function AuthButton({ compact = false }: { compact?: boolean }) {
               role="dialog"
               aria-modal="true"
               aria-label={user ? 'บัญชี FitSync' : 'เข้าสู่ระบบ FitSync'}
-              className="w-full max-w-md rounded-[2rem] border border-[#8f765d]/12 bg-[#fffaf2] p-6 text-[#55483d] shadow-[0_28px_80px_rgba(58,43,31,0.28)] dark:border-white/10 dark:bg-[#443a32] dark:text-[#fff4df]"
+              className="my-auto w-full max-w-md rounded-[2rem] border border-[#8f765d]/12 bg-[#fffaf2] p-6 text-[#55483d] shadow-[0_28px_80px_rgba(58,43,31,0.28)] dark:border-white/10 dark:bg-[#443a32] dark:text-[#fff4df]"
             >
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
@@ -226,9 +244,11 @@ export function AuthButton({ compact = false }: { compact?: boolean }) {
               {error && <p className="mt-4 rounded-xl bg-red-500/10 p-3 text-xs font-semibold text-red-600 dark:text-red-300">{error}</p>}
               {message && <p className="mt-4 rounded-xl bg-[#91ad8b]/15 p-3 text-xs font-semibold text-[#63775f] dark:text-[#c7dfc0]">{message}</p>}
             </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body,
+      )}
     </>
   );
 }
