@@ -35,6 +35,14 @@ import { resolveExerciseDetailFromLabel } from '@/lib/exercises';
 import { localDateKey, safeParseJson, sumFiniteNonNegative } from '@/lib/dailyLog';
 import { normalizeCoachMarkdown } from '@/lib/coachMarkdown';
 import {
+  loadCloudCoachState,
+  loadCloudDailyLog,
+  migrateLocalDataToCloud,
+  saveCloudCoachMessages,
+  saveCloudCoachProfile,
+  saveCloudDailyLog,
+} from '@/lib/cloudPersistence';
+import {
   loadCoachChat,
   loadCoachProfile,
   saveCoachChat,
@@ -42,6 +50,8 @@ import {
 } from '@/lib/coachPersistence';
 
 import { ConfirmDialog } from './_components/ConfirmDialog';
+import { AuthButton } from './_components/AuthButton';
+import { useAuth } from './_components/AuthProvider';
 import { MochiMascot } from './_components/MochiMascot';
 import type { MealEntry, MealType } from './_components/types/nutrition';
 
@@ -514,10 +524,12 @@ function NutritionSectionSkeleton() {
 
 function FitnessApp() {
   // --- Logic ---
+  const { user } = useAuth();
   const today = new Date();
   const dayOfWeek = today.getDay();
   const todaySchedule = SCHEDULE[dayOfWeek];
-  const storageKey = `log_${localDateKey(today)}`;
+  const logDate = localDateKey(today);
+  const storageKey = `log_${logDate}`;
 
   const makeId = () => {
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
@@ -621,6 +633,13 @@ function FitnessApp() {
   const [proteinEvents, setProteinEvents] = useState<ProteinEvent[]>(initialDailyLog.proteinEvents);
   const [workoutState, setWorkoutState] = useState<WorkoutState>(initialDailyLog.workout);
   const [meals, setMeals] = useState<MealEntry[]>(initialDailyLog.meals);
+  const [cloudSyncState, setCloudSyncState] = useState<'idle' | 'syncing' | 'ready' | 'error'>('idle');
+  const cloudReadyUserRef = useRef<string | null>(null);
+  const cloudUserRef = useRef(user);
+
+  useEffect(() => {
+    cloudUserRef.current = user;
+  }, [user]);
 
   const mealsRef = useRef<MealEntry[]>(meals);
   useEffect(() => {
@@ -772,6 +791,98 @@ function FitnessApp() {
       saveCoachProfile(coachProfile, draftProfile);
     } catch {}
   }, [coachProfile, draftProfile, coachPersistenceReady]);
+
+  useEffect(() => {
+    if (!user || !coachPersistenceReady) {
+      cloudReadyUserRef.current = null;
+      setCloudSyncState('idle');
+      return;
+    }
+
+    let cancelled = false;
+    setCloudSyncState('syncing');
+
+    void (async () => {
+      try {
+        await migrateLocalDataToCloud(user);
+        const [cloudLog, cloudCoach] = await Promise.all([
+          loadCloudDailyLog<DailyLog>(user.id, logDate),
+          loadCloudCoachState<CoachProfile, Draft, CoachChatMessage>(user.id),
+        ]);
+        if (cancelled) return;
+
+        if (cloudLog) {
+          const nextEvents = Array.isArray(cloudLog.proteinEvents) ? cloudLog.proteinEvents : [];
+          const nextMeals = Array.isArray(cloudLog.meals) ? cloudLog.meals : [];
+          const nextWorkout = cloudLog.workout && typeof cloudLog.workout === 'object'
+            ? cloudLog.workout
+            : makeWorkoutState(todaySchedule.exercises);
+          setProtein(sumFiniteNonNegative(nextEvents.map((event) => event.grams)));
+          setProteinEvents(nextEvents);
+          setWorkoutState(nextWorkout);
+          setMeals(nextMeals);
+          window.localStorage.setItem(storageKey, JSON.stringify({
+            protein: sumFiniteNonNegative(nextEvents.map((event) => event.grams)),
+            proteinEvents: nextEvents,
+            workout: nextWorkout,
+            meals: nextMeals,
+          }));
+        }
+
+        if (cloudCoach.profile) {
+          setCoachProfile(cloudCoach.profile);
+          if (cloudCoach.draftProfile) setDraftProfile(cloudCoach.draftProfile);
+          if (
+            cloudCoach.profile.ageYears
+            && cloudCoach.profile.heightCm
+            && cloudCoach.profile.weightKg
+          ) {
+            setCoachStep(5);
+          }
+        }
+        if (cloudCoach.messages.length) {
+          setCoachMessages(cloudCoach.messages.map((message) => ({
+            ...message,
+            text: message.role === 'assistant'
+              ? normalizeCoachMarkdown(message.text)
+              : message.text,
+          })));
+        }
+
+        cloudReadyUserRef.current = user.id;
+        setCloudSyncState('ready');
+      } catch (error) {
+        console.error('FitSync cloud hydration failed', error);
+        if (!cancelled) setCloudSyncState('error');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, coachPersistenceReady, logDate, storageKey, todaySchedule]);
+
+  useEffect(() => {
+    if (!user || cloudReadyUserRef.current !== user.id || !coachPersistenceReady) return;
+    const timer = window.setTimeout(() => {
+      void saveCloudCoachProfile(user, coachProfile, draftProfile).catch((error) => {
+        console.error('FitSync profile sync failed', error);
+        setCloudSyncState('error');
+      });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [user, coachProfile, draftProfile, coachPersistenceReady]);
+
+  useEffect(() => {
+    if (!user || cloudReadyUserRef.current !== user.id || !coachPersistenceReady) return;
+    const timer = window.setTimeout(() => {
+      void saveCloudCoachMessages(user.id, coachMessages).catch((error) => {
+        console.error('FitSync coach sync failed', error);
+        setCloudSyncState('error');
+      });
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [user, coachMessages, coachPersistenceReady]);
 
   useEffect(() => {
     coachMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -971,10 +1082,21 @@ function FitnessApp() {
   const flushSave = () => {
     if (typeof window === 'undefined') return;
     if (!pendingSaveRef.current) return;
+    const pending = pendingSaveRef.current;
     try {
-      localStorage.setItem(storageKey, JSON.stringify(pendingSaveRef.current));
+      localStorage.setItem(storageKey, JSON.stringify(pending));
     } catch {
       // Storage can be unavailable in private mode or when the quota is full.
+    }
+    const cloudUser = cloudUserRef.current;
+    if (cloudUser && cloudReadyUserRef.current === cloudUser.id) {
+      void saveCloudDailyLog(cloudUser.id, logDate, {
+        ...pending,
+        meals: pending.meals ?? [],
+      }).catch((error) => {
+        console.error('FitSync daily log sync failed', error);
+        setCloudSyncState('error');
+      });
     }
     pendingSaveRef.current = null;
     if (saveTimerRef.current) {
@@ -1249,6 +1371,7 @@ function FitnessApp() {
              >
                 <RotateCw className="w-5 h-5" />
              </button>
+             <AuthButton compact />
              <div className="hidden rounded-full bg-[#f1e4cf] px-3 py-1 text-[10px] font-bold text-[#8a6b55] sm:block dark:bg-white/5 dark:text-[#dbc8ac]">โหมดดูแลใจและกาย</div>
           </div>
         </div>
@@ -1296,6 +1419,20 @@ function FitnessApp() {
           </div>
 
           <div className="pt-6 mt-auto border-t border-emerald-900/5 dark:border-white/5 space-y-3">
+             <AuthButton />
+             {user && (
+               <div className={`px-2 text-[10px] font-bold ${
+                 cloudSyncState === 'error'
+                   ? 'text-red-500'
+                   : 'text-[#829079] dark:text-[#b8cbaa]'
+               }`}>
+                 {cloudSyncState === 'syncing'
+                   ? 'กำลังซิงก์ข้อมูล…'
+                   : cloudSyncState === 'error'
+                     ? 'ซิงก์ไม่สำเร็จ ข้อมูลยังเก็บในเครื่อง'
+                     : 'ซิงก์กับ Cloud แล้ว'}
+               </div>
+             )}
              {/* Theme Toggles Desktop */}
              <div className="flex items-center justify-between p-1 bg-emerald-900/5 dark:bg-white/5 rounded-2xl border border-emerald-900/5 dark:border-white/5 mb-2">
                 <button

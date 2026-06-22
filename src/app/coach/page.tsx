@@ -21,7 +21,14 @@ import {
   Plus,
 } from 'lucide-react';
 import { Header } from '@/app/_components/Header';
+import { useAuth } from '@/app/_components/AuthProvider';
 import { normalizeCoachMarkdown } from '@/lib/coachMarkdown';
+import {
+  loadCloudCoachState,
+  migrateLocalDataToCloud,
+  saveCloudCoachMessages,
+  saveCloudCoachProfile,
+} from '@/lib/cloudPersistence';
 import {
   loadCoachChat,
   loadCoachProfile,
@@ -267,6 +274,7 @@ function cn(...xs: Array<string | false | null | undefined>) {
 }
 
 export default function CoachPage() {
+  const { user } = useAuth();
   const [step, setStep] = useState(1);
   const [profile, setProfile] = useState<CoachProfile>({
     sex: 'male',
@@ -314,6 +322,7 @@ export default function CoachPage() {
   const [draft, setDraft] = useState('');
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [persistenceReady, setPersistenceReady] = useState(false);
+  const [cloudReadyUserId, setCloudReadyUserId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const parseOptionalNumber = (raw: string, opts?: { min?: number; max?: number }) => {
@@ -383,6 +392,64 @@ export default function CoachPage() {
       saveCoachProfile(profile, draftProfile);
     } catch {}
   }, [profile, draftProfile, persistenceReady]);
+
+  useEffect(() => {
+    if (!user || !persistenceReady) {
+      setCloudReadyUserId(null);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        await migrateLocalDataToCloud(user);
+        const cloud = await loadCloudCoachState<CoachProfile, Draft, CoachChatMessage>(user.id);
+        if (cancelled) return;
+        if (cloud.profile) {
+          setProfile(cloud.profile);
+          if (cloud.draftProfile) setDraftProfile(cloud.draftProfile);
+          if (cloud.profile.ageYears && cloud.profile.heightCm && cloud.profile.weightKg) {
+            setStep(5);
+          }
+        }
+        if (cloud.messages.length) {
+          setMessages(cloud.messages.map((message) => ({
+            ...message,
+            text: message.role === 'assistant'
+              ? normalizeCoachMarkdown(message.text)
+              : message.text,
+          })));
+        }
+        setCloudReadyUserId(user.id);
+      } catch (error) {
+        console.error('FitSync coach cloud hydration failed', error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, persistenceReady]);
+
+  useEffect(() => {
+    if (!user || cloudReadyUserId !== user.id || !persistenceReady) return;
+    const timer = window.setTimeout(() => {
+      void saveCloudCoachProfile(user, profile, draftProfile).catch((error) => {
+        console.error('FitSync coach profile sync failed', error);
+      });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [user, cloudReadyUserId, profile, draftProfile, persistenceReady]);
+
+  useEffect(() => {
+    if (!user || cloudReadyUserId !== user.id || !persistenceReady) return;
+    const timer = window.setTimeout(() => {
+      void saveCloudCoachMessages(user.id, messages).catch((error) => {
+        console.error('FitSync coach messages sync failed', error);
+      });
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [user, cloudReadyUserId, messages, persistenceReady]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });

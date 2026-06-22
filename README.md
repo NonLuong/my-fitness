@@ -66,6 +66,27 @@ Migration นี้สร้างตารางโปรไฟล์ บัน
 ก่อนเปิดระบบสมาชิก ให้นำ migration ไปใช้กับ Supabase ผ่าน Database Migrations
 ของ GitHub integration หรือวาง SQL ใน Supabase SQL Editor เพียงหนึ่งครั้ง
 
+หลังเพิ่มระบบ Cloud Sync ให้รัน migration ตามลำดับเวลา โดยรวมถึง:
+
+```text
+supabase/migrations/20260622010000_coach_message_client_id.sql
+```
+
+จากนั้นตรวจที่ Supabase → Authentication → Providers:
+
+- Email เปิดใช้งานได้ทันที
+- Google ต้องเปิด Provider และใส่ Google OAuth Client ID/Secret ก่อน ปุ่ม Google
+  ในแอปจึงจะเข้าสู่ระบบได้
+
+ตั้งค่า Authentication URL:
+
+```text
+Site URL: https://your-production-domain.vercel.app
+Redirect URLs:
+https://your-production-domain.vercel.app/auth/callback
+http://localhost:3000/auth/callback
+```
+
 ตรวจว่าเว็บอ่านค่าตั้งค่า AI ได้ที่:
 
 ```text
