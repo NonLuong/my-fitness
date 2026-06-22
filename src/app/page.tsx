@@ -35,6 +35,7 @@ import { resolveExerciseDetailFromLabel } from '@/lib/exercises';
 import { localDateKey, safeParseJson, sumFiniteNonNegative } from '@/lib/dailyLog';
 import { normalizeCoachMarkdown } from '@/lib/coachMarkdown';
 import {
+  cloudErrorMessage,
   loadCloudCoachState,
   loadCloudDailyLog,
   migrateLocalDataToCloud,
@@ -634,6 +635,8 @@ function FitnessApp() {
   const [workoutState, setWorkoutState] = useState<WorkoutState>(initialDailyLog.workout);
   const [meals, setMeals] = useState<MealEntry[]>(initialDailyLog.meals);
   const [cloudSyncState, setCloudSyncState] = useState<'idle' | 'syncing' | 'ready' | 'error'>('idle');
+  const [cloudSyncError, setCloudSyncError] = useState<string | null>(null);
+  const [cloudRetryToken, setCloudRetryToken] = useState(0);
   const cloudReadyUserRef = useRef<string | null>(null);
   const cloudUserRef = useRef(user);
 
@@ -796,21 +799,24 @@ function FitnessApp() {
     if (!user || !coachPersistenceReady) {
       cloudReadyUserRef.current = null;
       setCloudSyncState('idle');
+      setCloudSyncError(null);
       return;
     }
 
     let cancelled = false;
     setCloudSyncState('syncing');
+    setCloudSyncError(null);
 
     void (async () => {
       try {
-        await migrateLocalDataToCloud(user);
-        const [cloudLog, cloudCoach] = await Promise.all([
+        const migration = await migrateLocalDataToCloud(user);
+        const [logResult, coachResult] = await Promise.allSettled([
           loadCloudDailyLog<DailyLog>(user.id, logDate),
           loadCloudCoachState<CoachProfile, Draft, CoachChatMessage>(user.id),
         ]);
         if (cancelled) return;
 
+        const cloudLog = logResult.status === 'fulfilled' ? logResult.value : null;
         if (cloudLog) {
           const nextEvents = Array.isArray(cloudLog.proteinEvents) ? cloudLog.proteinEvents : [];
           const nextMeals = Array.isArray(cloudLog.meals) ? cloudLog.meals : [];
@@ -829,7 +835,8 @@ function FitnessApp() {
           }));
         }
 
-        if (cloudCoach.profile) {
+        const cloudCoach = coachResult.status === 'fulfilled' ? coachResult.value : null;
+        if (cloudCoach?.profile) {
           setCoachProfile(cloudCoach.profile);
           if (cloudCoach.draftProfile) setDraftProfile(cloudCoach.draftProfile);
           if (
@@ -840,7 +847,7 @@ function FitnessApp() {
             setCoachStep(5);
           }
         }
-        if (cloudCoach.messages.length) {
+        if (cloudCoach?.messages.length) {
           setCoachMessages(cloudCoach.messages.map((message) => ({
             ...message,
             text: message.role === 'assistant'
@@ -849,18 +856,36 @@ function FitnessApp() {
           })));
         }
 
-        cloudReadyUserRef.current = user.id;
-        setCloudSyncState('ready');
+        const issues = [
+          ...migration.issues.map((issue) => `${issue.area}: ${issue.message}`),
+          ...(logResult.status === 'rejected'
+            ? [`daily_logs: ${cloudErrorMessage(logResult.reason)}`]
+            : []),
+          ...(coachResult.status === 'rejected'
+            ? [`coach_messages: ${cloudErrorMessage(coachResult.reason)}`]
+            : []),
+        ];
+
+        if (issues.length) {
+          setCloudSyncError(issues.join(' | '));
+          setCloudSyncState('error');
+        } else {
+          cloudReadyUserRef.current = user.id;
+          setCloudSyncState('ready');
+        }
       } catch (error) {
         console.error('FitSync cloud hydration failed', error);
-        if (!cancelled) setCloudSyncState('error');
+        if (!cancelled) {
+          setCloudSyncError(cloudErrorMessage(error));
+          setCloudSyncState('error');
+        }
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [user, coachPersistenceReady, logDate, storageKey, todaySchedule]);
+  }, [user, coachPersistenceReady, logDate, storageKey, todaySchedule, cloudRetryToken]);
 
   useEffect(() => {
     if (!user || cloudReadyUserRef.current !== user.id || !coachPersistenceReady) return;
@@ -1431,6 +1456,25 @@ function FitnessApp() {
                    : cloudSyncState === 'error'
                      ? 'ซิงก์ไม่สำเร็จ ข้อมูลยังเก็บในเครื่อง'
                      : 'ซิงก์กับ Cloud แล้ว'}
+                 {cloudSyncState === 'error' && (
+                   <>
+                     <button
+                       type="button"
+                       onClick={() => setCloudRetryToken((token) => token + 1)}
+                       className="mt-1 block font-extrabold underline underline-offset-2"
+                     >
+                       ลองซิงก์ใหม่
+                     </button>
+                     {cloudSyncError && (
+                       <span
+                         title={cloudSyncError}
+                         className="mt-1 block max-w-full truncate text-[9px] font-medium text-red-400"
+                       >
+                         {cloudSyncError}
+                       </span>
+                     )}
+                   </>
+                 )}
                </div>
              )}
              {/* Theme Toggles Desktop */}
