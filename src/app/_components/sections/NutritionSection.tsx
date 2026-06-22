@@ -9,6 +9,13 @@ import { fadeUp, springy, staggerContainer } from '../utils/motion';
 
 import type { MealEntry } from '../types/nutrition';
 
+const MEAL_TYPE_LABELS: Record<MealEntry['mealType'], string> = {
+  breakfast: 'มื้อเช้า',
+  lunch: 'มื้อกลางวัน',
+  dinner: 'มื้อเย็น',
+  snack: 'มื้อว่าง',
+};
+
 export function NutritionSection(props: {
   mobileVisible: boolean;
   prefersReducedMotion: boolean;
@@ -39,6 +46,22 @@ export function NutritionSection(props: {
     const timer = setTimeout(() => setMounted(true), 0);
     return () => clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (!historyOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setHistoryOpen(false);
+    };
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', closeOnEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [historyOpen]);
 
   return (
     <>
@@ -129,7 +152,7 @@ export function NutritionSection(props: {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setHistoryOpen(false)}
-              className="fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px]"
+              className="fixed inset-0 z-40 bg-[#342d27]/45 backdrop-blur-[3px]"
             />
             
             {/* Drawer Panel */}
@@ -138,37 +161,46 @@ export function NutritionSection(props: {
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed inset-y-0 right-0 z-50 w-full max-w-md border-l border-[#8f765d]/10 bg-[#fff8ed]/97 text-[#55483d] shadow-2xl backdrop-blur-2xl dark:border-white/5 dark:bg-[#443a32]/97 dark:text-[#fff4df]"
+              role="dialog"
+              aria-modal="true"
+              aria-label="ประวัติมื้ออาหาร"
+              className="fixed inset-y-0 right-0 z-50 w-full max-w-md border-l border-[#8f765d]/12 bg-[#fffaf2]/98 text-[#55483d] shadow-[-24px_0_70px_rgba(58,43,31,0.2)] backdrop-blur-2xl dark:border-white/8 dark:bg-[#443a32]/98 dark:text-[#fff4df]"
             >
               <div className="flex h-full flex-col">
                 {/* Drawer Header */}
-                <div className="flex items-center justify-between border-b border-white/5 px-6 py-5">
+                <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-[#8f765d]/10 bg-[#fffaf2]/96 px-5 pb-4 pt-[calc(1rem+env(safe-area-inset-top))] backdrop-blur-xl dark:border-white/8 dark:bg-[#443a32]/96 sm:px-6 sm:py-5">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.2)]">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[#d98c68]/18 bg-[#d98c68]/13 text-[#b66f50] shadow-[0_8px_20px_rgba(177,105,75,0.1)] dark:text-[#f2b095]">
                       <Utensils className="h-5 w-5" />
                     </div>
                     <div>
                       <h2 className="text-lg font-extrabold text-[#55483d] dark:text-[#fff4df]">ประวัติมื้ออาหาร</h2>
-                      <p className="text-xs font-medium text-emerald-100/40">รายการของวันนี้</p>
+                      <p className="text-xs font-medium text-[#a18c79] dark:text-[#d7c5aa]">รายการของวันนี้</p>
                     </div>
                   </div>
                   <button
+                    type="button"
                     onClick={() => setHistoryOpen(false)}
-                    className="rounded-full p-2 text-emerald-100/40 transition hover:bg-white/10 hover:text-white"
+                    aria-label="ปิดประวัติมื้ออาหาร"
+                    className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#8f765d]/12 bg-[#fffdf8] text-[#725f50] shadow-sm transition hover:border-[#d98c68]/30 hover:bg-[#f7ead8] hover:text-[#a96550] active:scale-95 dark:border-white/10 dark:bg-white/8 dark:text-[#fff4df] dark:hover:bg-white/12"
                   >
-                    <X className="h-6 w-6" />
+                    <X className="h-5 w-5" strokeWidth={2.4} />
                   </button>
                 </div>
 
                 {/* Drawer Content (Scrollable) */}
-                <div className="flex-1 overflow-y-auto p-6">
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:p-6">
                   {meals.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-12 text-center">
-                      <div className="mb-4 rounded-full bg-[#0a120f] p-4 border border-white/5">
-                        <Utensils className="h-8 w-8 text-emerald-100/40" />
+                      <div className="mb-4 rounded-3xl border border-[#8f765d]/10 bg-[#f1e4cf]/55 p-4 dark:border-white/8 dark:bg-white/5">
+                        <Utensils className="h-8 w-8 text-[#a18c79] dark:text-[#d7c5aa]" />
                       </div>
-                      <p className="text-sm font-medium text-emerald-100/40">วันนี้ยังไม่มีมื้ออาหารที่บันทึกไว้</p>
-                      <button onClick={() => { setHistoryOpen(false); onOpenAi(); }} className="mt-4 text-xs font-bold text-emerald-400 hover:underline">
+                      <p className="text-sm font-medium text-[#8a725f] dark:text-[#d7c5aa]">วันนี้ยังไม่มีมื้ออาหารที่บันทึกไว้</p>
+                      <button
+                        type="button"
+                        onClick={() => { setHistoryOpen(false); onOpenAi(); }}
+                        className="mt-4 text-xs font-bold text-[#b66f50] hover:underline dark:text-[#f2b095]"
+                      >
                         เพิ่มมื้อแรกของวันนี้
                       </button>
                     </div>
@@ -184,21 +216,21 @@ export function NutritionSection(props: {
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: i * 0.05 }}
                             key={m.id}
-                            className="group relative overflow-hidden rounded-3xl border border-white/5 bg-[#0a120f]/40 p-4 transition hover:bg-[#0a120f]/60 hover:shadow-md hover:border-emerald-500/20"
+                            className="group relative overflow-hidden rounded-3xl border border-[#8f765d]/11 bg-[#fffdf8]/80 p-4 shadow-[0_10px_28px_rgba(105,82,57,0.07)] transition hover:-translate-y-0.5 hover:border-[#d98c68]/24 hover:shadow-[0_16px_34px_rgba(105,82,57,0.12)] dark:border-white/8 dark:bg-white/6"
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2">
-                                  <span className="rounded-md bg-emerald-950/30 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-100/60 border border-white/5">
-                                    {m.mealType}
+                                  <span className="rounded-lg border border-[#d98c68]/18 bg-[#d98c68]/11 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[#a96550] dark:text-[#f2b095]">
+                                    {MEAL_TYPE_LABELS[m.mealType]}
                                   </span>
-                                  <span className="text-[11px] text-emerald-100/40">
+                                  <span className="text-[11px] font-medium text-[#a18c79] dark:text-[#cdb99d]">
                                     {new Date(m.ts).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}
                                   </span>
                                 </div>
                                 <div className="mt-1.5 space-y-1">
                                   {m.items.map((it, idx) => (
-                                    <div key={idx} className="text-sm font-bold text-white">
+                                    <div key={idx} className="text-sm font-bold text-[#55483d] dark:text-[#fff4df]">
                                       {it.itemName}
                                     </div>
                                   ))}
@@ -206,19 +238,20 @@ export function NutritionSection(props: {
                               </div>
                               
                               <div className="text-right">
-                                <div className="text-lg font-black text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">
-                                  {Math.round(kcal)} <span className="text-[10px] font-bold text-emerald-400/50">kcal</span>
+                                <div className="text-lg font-black text-[#b66f50] dark:text-[#f2b095]">
+                                  {Math.round(kcal)} <span className="text-[10px] font-bold text-[#b66f50]/60 dark:text-[#f2b095]/60">kcal</span>
                                 </div>
-                                <div className="text-xs font-semibold text-emerald-100/40">
-                                  {Math.round(p)}g Protein
+                                <div className="text-xs font-semibold text-[#8a725f] dark:text-[#d7c5aa]">
+                                  โปรตีน {Math.round(p)}g
                                 </div>
                               </div>
                             </div>
 
-                            <div className="mt-3 flex items-center justify-end border-t border-white/5 pt-3">
+                            <div className="mt-3 flex items-center justify-end border-t border-[#8f765d]/9 pt-3 dark:border-white/8">
                               <button
+                                type="button"
                                 onClick={() => onRequestDeleteMeal(m.id)}
-                                className="text-[11px] font-bold text-rose-500 transition hover:text-rose-600 hover:underline"
+                                className="rounded-full px-2 py-1 text-[11px] font-bold text-[#bd6658] transition hover:bg-[#bd6658]/10 hover:text-[#a74f43]"
                               >
                                 ลบรายการ
                               </button>
@@ -231,11 +264,19 @@ export function NutritionSection(props: {
                 </div>
                 
                 {/* Drawer Footer */}
-                <div className="border-t border-white/5 bg-emerald-950/30 px-6 py-4">
-                   <div className="flex justify-between text-xs font-semibold text-emerald-100/40">
+                <div className="shrink-0 border-t border-[#8f765d]/10 bg-[#f1e4cf]/42 px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 dark:border-white/8 dark:bg-white/5 sm:px-6 sm:pb-4">
+                   <div className="flex justify-between text-xs font-semibold text-[#8a725f] dark:text-[#d7c5aa]">
                       <span>จำนวนมื้อทั้งหมด</span>
                       <span>{meals.length}</span>
                    </div>
+                   <button
+                     type="button"
+                     onClick={() => setHistoryOpen(false)}
+                     className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-[#8f765d]/12 bg-[#fffdf8] py-3 text-sm font-extrabold text-[#725f50] shadow-sm transition active:scale-[0.98] dark:border-white/10 dark:bg-white/8 dark:text-[#fff4df] sm:hidden"
+                   >
+                     <X className="h-4 w-4" />
+                     ปิดประวัติมื้ออาหาร
+                   </button>
                 </div>
               </div>
             </motion.div>
