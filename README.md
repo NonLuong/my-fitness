@@ -71,11 +71,15 @@ Migration นี้สร้างตารางโปรไฟล์ บัน
 ```text
 supabase/migrations/20260622010000_coach_message_client_id.sql
 supabase/migrations/20260622020000_daily_checkins_progress.sql
+supabase/migrations/20260622030000_weekly_ai_reviews.sql
 ```
 
 Migration สำหรับ Daily Check-in จะเพิ่มสัดส่วนร่างกายใน `body_measurements`
 และสร้างตาราง `daily_checkins` สำหรับการนอน น้ำดื่ม พลังงาน ความหิว อารมณ์
 และโน้ตประจำวัน พร้อม RLS แยกข้อมูลของสมาชิกแต่ละคน
+
+Migration สำหรับ Weekly AI Review จะสร้างตาราง `weekly_reviews` สำหรับเก็บ
+snapshot และผลสรุปรายสัปดาห์แบบ cache หนึ่งรายการต่อสมาชิกต่อสัปดาห์
 
 จากนั้นตรวจที่ Supabase → Authentication → Providers:
 
