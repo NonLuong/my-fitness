@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenAI } from '@google/genai';
 import { preprocessThaiMeal } from '@/lib/thaiMealPreprocess';
+import { checkRateLimit, contentLengthExceeds, getClientIp } from '@/lib/apiGuards';
+import { createGeminiClient, getGeminiModelCandidates, nutritionResponseSchema } from '@/lib/gemini';
+import { estimateThaiMeal, hasCompleteThaiEstimate } from '@/lib/thaiNutritionEstimate';
 
 export const runtime = 'nodejs';
 
@@ -53,137 +55,6 @@ type GeminiResultItem = {
   warnings?: unknown;
   funFact?: unknown;
 };
-
-type FallbackEstimate = {
-  itemName: string;
-  assumedServing: string;
-  caloriesKcal: number;
-  proteinG: number;
-  carbsG: number;
-  fatG: number;
-  fiberG?: number;
-  sugarG?: number;
-  sodiumMg?: number;
-  confidence: NutritionResult['confidence'];
-  notes: string[];
-};
-
-function clampNonNegative(n: number): number {
-  if (!Number.isFinite(n)) return 0;
-  return n < 0 ? 0 : n;
-}
-
-function maybeParseGrams(raw: string): number | null {
-  const m = /(?:^|\s)(\d+(?:\.\d+)?)\s*(?:g\b|กรัม)\b/i.exec(raw);
-  if (!m?.[1]) return null;
-  const v = Number(m[1]);
-  return Number.isFinite(v) && v > 0 ? v : null;
-}
-
-function estimateFromParsedItems(
-  pre: ReturnType<typeof preprocessThaiMeal> | null,
-  userText: string,
-): FallbackEstimate[] {
-  if (!pre) return [];
-
-  // Lightweight, conservative fallbacks (per "standard serving" or explicit grams if present)
-  // Notes: These are intentionally rough but stable.
-  const out: FallbackEstimate[] = [];
-
-  for (const it of pre.items) {
-    const name = it.name;
-    const raw = it.raw;
-    const qty = Number.isFinite(it.qty) && it.qty > 0 ? it.qty : 1;
-
-    // Eggs
-    if (name.includes('ไข่')) {
-      // 1 egg ~ 70 kcal, P 6g, F 5g, C 0.5g
-      const per = { kcal: 70, p: 6, c: 0.5, f: 5 };
-      const mult = qty;
-      out.push({
-        itemName: name.includes('ไข่ดาว') ? 'ไข่ดาว' : name.includes('ไข่ต้ม') ? 'ไข่ต้ม' : 'ไข่',
-        assumedServing: `${qty} ${it.unit ?? 'ฟอง'}`,
-        caloriesKcal: Math.round(per.kcal * mult),
-        proteinG: Math.round(per.p * mult),
-        carbsG: Math.round(per.c * mult),
-        fatG: Math.round(per.f * mult),
-        confidence: 'high',
-        notes: ['คำนวณแบบประมาณจากไข่ไก่มาตรฐานต่อฟอง'],
-      });
-      continue;
-    }
-
-    // Whey protein
-    if (name.includes('เวย์โปรตีน') || name.includes('เวย์')) {
-      // 1 scoop typical: 120 kcal, P 24g, C 3g, F 2g
-      const per = { kcal: 120, p: 24, c: 3, f: 2 };
-      const mult = qty;
-      out.push({
-        itemName: 'เวย์โปรตีน',
-        assumedServing: `${qty} ${it.unit ?? 'สกู๊ป'}`,
-        caloriesKcal: Math.round(per.kcal * mult),
-        proteinG: Math.round(per.p * mult),
-        carbsG: Math.round(per.c * mult),
-        fatG: Math.round(per.f * mult),
-        confidence: 'high',
-        notes: ['คำนวณแบบประมาณจากเวย์ 1 สกู๊ปมาตรฐาน (ขึ้นกับยี่ห้อ)'],
-      });
-      continue;
-    }
-
-    // Simple cooked rice
-    if (name.includes('ข้าวสวย') || name === 'ข้าว') {
-      // 1 cup cooked ~ 240 kcal, P 4g, C 53g, F 0.5g
-      const per = { kcal: 240, p: 4, c: 53, f: 0.5 };
-      const mult = qty;
-      out.push({
-        itemName: 'ข้าวสวย',
-        assumedServing: `${qty} ${it.unit ?? 'ถ้วย'}`,
-        caloriesKcal: Math.round(per.kcal * mult),
-        proteinG: Math.round(per.p * mult),
-        carbsG: Math.round(per.c * mult),
-        fatG: Math.round(per.f * mult),
-        confidence: 'medium',
-        notes: ['คำนวณแบบประมาณจากข้าวสวยสุก 1 ถ้วยมาตรฐาน'],
-      });
-      continue;
-    }
-
-    // Thai basil stir-fry on rice (krapow)
-    if (name.includes('ข้าวกะเพรา')) {
-      // Use grams if user provided; otherwise use standard plate.
-      const grams = maybeParseGrams(raw) ?? maybeParseGrams(userText);
-      // Rough standard 1 plate: 650 kcal, P 28g, C 75g, F 25g
-      const base = { kcal: 650, p: 28, c: 75, f: 25 };
-      // If grams provided, scale relative to 350g plate baseline.
-      const scale = grams ? grams / 350 : qty;
-      out.push({
-        itemName: name,
-        assumedServing: grams ? `${Math.round(grams)} กรัม (ประมาณ)` : `${qty} จาน (มาตรฐาน)` ,
-        caloriesKcal: Math.round(base.kcal * scale),
-        proteinG: Math.round(base.p * scale),
-        carbsG: Math.round(base.c * scale),
-        fatG: Math.round(base.f * scale),
-        confidence: grams ? 'high' : 'medium',
-        notes: [
-          grams
-            ? 'คำนวณแบบสเกลจากกะเพราราดข้าวจานมาตรฐาน ~350 กรัม'
-            : 'ประมาณจากกะเพราราดข้าวจานมาตรฐาน (สูตร/น้ำมันทำให้คลาดเคลื่อนได้)',
-        ],
-      });
-      continue;
-    }
-  }
-
-  // Clamp negatives
-  return out.map((r) => ({
-    ...r,
-    caloriesKcal: clampNonNegative(r.caloriesKcal),
-    proteinG: clampNonNegative(r.proteinG),
-    carbsG: clampNonNegative(r.carbsG),
-    fatG: clampNonNegative(r.fatG),
-  }));
-}
 
 function clampNumber(n: unknown): number | null {
   if (typeof n !== 'number' || !Number.isFinite(n)) return null;
@@ -304,15 +175,24 @@ function parseGeminiJson(raw: string): GeminiJson {
 
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    if (contentLengthExceeds(req, 6 * 1024 * 1024)) {
       return NextResponse.json<ApiResponse>(
+        { ok: false, error: 'ไฟล์หรือข้อมูลมีขนาดใหญ่เกิน 6 MB' },
+        { status: 413 },
+      );
+    }
+
+    const rateLimit = checkRateLimit(`nutrition:${getClientIp(req)}`, {
+      limit: 12,
+      windowMs: 60_000,
+    });
+    if (!rateLimit.allowed) {
+      return NextResponse.json<ApiResponse>(
+        { ok: false, error: `ส่งคำขอถี่เกินไป กรุณาลองใหม่ใน ${rateLimit.retryAfterSeconds} วินาที` },
         {
-          ok: false,
-          error:
-            'Missing GEMINI_API_KEY. Add it to .env.local (see .env.local.example) and restart the dev server.',
+          status: 429,
+          headers: { 'Retry-After': String(rateLimit.retryAfterSeconds) },
         },
-        { status: 500 },
       );
     }
 
@@ -320,7 +200,31 @@ export async function POST(req: Request) {
     const text = String(form.get('text') ?? '').trim();
     const image = form.get('image');
 
+    if (text.length > 2_000) {
+      return NextResponse.json<ApiResponse>(
+        { ok: false, error: 'รายละเอียดอาหารยาวเกินไป กรุณาไม่เกิน 2,000 ตัวอักษร' },
+        { status: 400 },
+      );
+    }
+
+    if (image instanceof File) {
+      const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
+      if (!allowedTypes.has(image.type)) {
+        return NextResponse.json<ApiResponse>(
+          { ok: false, error: 'รองรับเฉพาะรูป JPEG, PNG, WebP หรือ HEIC' },
+          { status: 415 },
+        );
+      }
+      if (image.size > 5 * 1024 * 1024) {
+        return NextResponse.json<ApiResponse>(
+          { ok: false, error: 'รูปภาพต้องมีขนาดไม่เกิน 5 MB' },
+          { status: 413 },
+        );
+      }
+    }
+
     const pre = text ? preprocessThaiMeal(text) : null;
+    const standardEstimates = estimateThaiMeal(pre);
 
     if (!text && !(image instanceof File)) {
       return NextResponse.json<ApiResponse>(
@@ -329,7 +233,38 @@ export async function POST(req: Request) {
       );
     }
 
-    const ai = new GoogleGenAI({ apiKey });
+    // Common Thai dishes do not need an AI round-trip. A standard restaurant
+    // serving is more useful than asking users for weights they normally do not know.
+    if (!(image instanceof File) && hasCompleteThaiEstimate(pre, standardEstimates)) {
+      return NextResponse.json<ApiResponse>({
+        ok: true,
+        results: standardEstimates,
+        followUpQuestions: [],
+        reasoningSummary:
+          'ประเมินจากปริมาณมาตรฐานของร้านอาหารทั่วไป ผู้ใช้ไม่จำเป็นต้องระบุน้ำหนักวัตถุดิบ',
+      });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      if (standardEstimates.length > 0) {
+        return NextResponse.json<ApiResponse>({
+          ok: true,
+          results: standardEstimates,
+          followUpQuestions: [],
+          reasoningSummary: 'ใช้ฐานข้อมูลประมาณการอาหารไทย เนื่องจากยังไม่ได้ตั้งค่า Gemini API',
+        });
+      }
+      return NextResponse.json<ApiResponse>(
+        {
+          ok: false,
+          error: 'ยังไม่ได้ตั้งค่า GEMINI_API_KEY และไม่พบเมนูนี้ในฐานข้อมูลอาหารไทย',
+        },
+        { status: 500 },
+      );
+    }
+
+    const ai = createGeminiClient(apiKey);
 
     const instruction =
       'You are a nutrition assistant. Estimate nutrition for the described meal (and image if provided).\n' +
@@ -339,6 +274,11 @@ export async function POST(req: Request) {
         ? `Helper input (from Thai text pre-parser):\n- normalizedText: ${pre.normalizedText}\n- parsedItems: ${JSON.stringify(
             pre.items,
           )}\n- parserWarnings: ${JSON.stringify(pre.warnings)}\nUse parsedItems only as a hint to split foods and quantities; still interpret context correctly.\n`
+        : '') +
+      (standardEstimates.length
+        ? `Known Thai standard-serving estimates (use as a reliable baseline, do not ask the user for grams): ${JSON.stringify(
+            standardEstimates,
+          )}\n`
         : '') +
       'Schema (example with placeholder values, do not include comments):\n' +
       '{\n' +
@@ -366,6 +306,8 @@ export async function POST(req: Request) {
       '}\n' +
   'Rules:\n' +
   '- เป้าหมายคือใช้งานง่าย: ให้ประมาณจาก “ปริมาณมาตรฐานที่คนทั่วไปกิน” ของอาหารชนิดนั้น โดยไม่ต้องให้ผู้ใช้ชั่งน้ำหนัก\n' +
+  '- ห้ามขอให้ผู้ใช้ระบุน้ำหนักข้าวหรือเนื้อสำหรับอาหารตามสั่งทั่วไป ถ้าไม่ได้ระบุให้ใช้ portion ร้านทั่วไปทันที\n' +
+  '- หากมี Known Thai standard-serving estimates ให้ยึดค่านั้นเป็น baseline และปรับเฉพาะเมื่อข้อความหรือรูปให้หลักฐานชัดเจน\n' +
   '- ถ้าผู้ใช้ “ไม่ระบุจำนวน” ให้ถือว่า = 1 เสมอ (เช่น 1 จาน / 1 ชิ้น / 1 อัน แล้วแต่อาหาร)\n' +
   '- ถ้าผู้ใช้ “ระบุจำนวน” (เช่น 2 จาน, 3 ชิ้น, 1 กล่อง, 2 ขวด) ให้คูณตามจำนวนที่ระบุ\n' +
   '- สำหรับอาหารไทยทั่วไป ให้สมมติเป็น 1 จาน/1 ชาม/1 ชุด แบบมาตรฐาน และเขียน assumedServing ให้ชัด (เช่น “1 จาน (~350–400 กรัมโดยประมาณ)”)\n' +
@@ -392,15 +334,7 @@ export async function POST(req: Request) {
 
   // Model availability varies by project / API version.
   // We'll try a small fallback chain of commonly available model IDs.
-    const modelCandidates = [
-      // Prefer a stable, strong reasoning model.
-      'gemini-2.5-pro',
-      // Fast + cheaper fallbacks.
-      'gemini-2.5-flash',
-      'gemini-2.5-flash-lite',
-      // Preview model (may require extra access / may change).
-      'gemini-3-pro-preview',
-    ];
+    const modelCandidates = getGeminiModelCandidates();
 
     let resp: Awaited<ReturnType<typeof ai.models.generateContent>> | null = null;
     let lastErr: unknown = null;
@@ -413,8 +347,9 @@ export async function POST(req: Request) {
           config: {
             temperature: 0.2,
             // Prevent truncation for multi-item meals.
-            maxOutputTokens: 1400,
+            maxOutputTokens: 2500,
             responseMimeType: 'application/json',
+            responseJsonSchema: nutritionResponseSchema,
           },
         });
         break;
@@ -425,6 +360,14 @@ export async function POST(req: Request) {
     }
 
     if (!resp) {
+      if (standardEstimates.length > 0) {
+        return NextResponse.json<ApiResponse>({
+          ok: true,
+          results: standardEstimates,
+          followUpQuestions: [],
+          reasoningSummary: 'Gemini ไม่พร้อมใช้งาน จึงใช้ค่าประมาณจาก portion ร้านอาหารไทยมาตรฐาน',
+        });
+      }
       throw lastErr instanceof Error
         ? lastErr
         : new Error('No supported Gemini model found for generateContent in this project.');
@@ -461,8 +404,9 @@ export async function POST(req: Request) {
             ],
             config: {
               temperature: 0,
-              maxOutputTokens: 1400,
+              maxOutputTokens: 2500,
               responseMimeType: 'application/json',
+              responseJsonSchema: nutritionResponseSchema,
             },
           });
           break;
@@ -480,6 +424,14 @@ export async function POST(req: Request) {
             errorId,
             raw: truncateForLog(repairRaw),
           });
+          if (standardEstimates.length > 0) {
+            return NextResponse.json<ApiResponse>({
+              ok: true,
+              results: standardEstimates,
+              followUpQuestions: [],
+              reasoningSummary: 'AI ตอบกลับไม่สมบูรณ์ จึงใช้ฐานข้อมูล portion อาหารไทยมาตรฐานแทน',
+            });
+          }
           return NextResponse.json<ApiResponse>(
             {
               ok: false,
@@ -490,6 +442,14 @@ export async function POST(req: Request) {
           );
         }
       } else {
+        if (standardEstimates.length > 0) {
+          return NextResponse.json<ApiResponse>({
+            ok: true,
+            results: standardEstimates,
+            followUpQuestions: [],
+            reasoningSummary: 'AI ตอบกลับไม่สมบูรณ์ จึงใช้ฐานข้อมูล portion อาหารไทยมาตรฐานแทน',
+          });
+        }
         return NextResponse.json<ApiResponse>(
           {
             ok: false,
@@ -553,7 +513,7 @@ export async function POST(req: Request) {
           (r.fatG ?? 0) === 0,
       );
 
-    const fallback = hasAllZeroMacros ? estimateFromParsedItems(pre, text) : [];
+    const fallback = hasAllZeroMacros ? standardEstimates : [];
     const finalResults: NutritionResult[] =
       fallback.length > 0
         ? fallback.map((f) => ({

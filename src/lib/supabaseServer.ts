@@ -1,1 +1,1 @@
-// (intentionally left blank)
+export { createSupabaseServerClient } from './supabase/server';

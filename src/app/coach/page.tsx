@@ -21,6 +21,13 @@ import {
   Plus,
 } from 'lucide-react';
 import { Header } from '@/app/_components/Header';
+import { normalizeCoachMarkdown } from '@/lib/coachMarkdown';
+import {
+  loadCoachChat,
+  loadCoachProfile,
+  saveCoachChat,
+  saveCoachProfile,
+} from '@/lib/coachPersistence';
 
 type Sex = 'male' | 'female';
 type Experience = 'beginner' | 'intermediate' | 'advanced';
@@ -260,9 +267,6 @@ function cn(...xs: Array<string | false | null | undefined>) {
 }
 
 export default function CoachPage() {
-  const STORAGE_KEY = 'coach_chat_v1';
-  const PROFILE_KEY = 'coach_profile_v1';
-
   const [step, setStep] = useState(1);
   const [profile, setProfile] = useState<CoachProfile>({
     sex: 'male',
@@ -309,6 +313,7 @@ export default function CoachPage() {
   const [messages, setMessages] = useState<CoachChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [followUps, setFollowUps] = useState<string[]>([]);
+  const [persistenceReady, setPersistenceReady] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const parseOptionalNumber = (raw: string, opts?: { min?: number; max?: number }) => {
@@ -327,48 +332,30 @@ export default function CoachPage() {
   };
 
   useEffect(() => {
-    // Load profile + chat
-    const now = Date.now();
-    const EXPIRATION_MS = 24 * 60 * 60 * 1000; // 24 hours
-
     try {
-      const rawProfile = localStorage.getItem(PROFILE_KEY);
-      if (rawProfile) {
-        const data = JSON.parse(rawProfile);
-        // Check if valid and not expired
-        if (data.timestamp && (now - data.timestamp < EXPIRATION_MS)) {
-          if (data.profile) setProfile(data.profile);
-          if (data.draftProfile) setDraftProfile(data.draftProfile);
-          
-          if (data.profile?.ageYears && data.profile?.heightCm && data.profile?.weightKg && data.profile?.goal) {
-            setStep(5);
-          }
-        } else {
-          // Expired or invalid format -> Clear
-          localStorage.removeItem(PROFILE_KEY);
+      const savedProfile = loadCoachProfile<CoachProfile, Draft>();
+      if (savedProfile) {
+        setProfile(savedProfile.profile);
+        if (savedProfile.draftProfile) setDraftProfile(savedProfile.draftProfile);
+        if (
+          savedProfile.profile.ageYears
+          && savedProfile.profile.heightCm
+          && savedProfile.profile.weightKg
+          && savedProfile.profile.goal
+        ) {
+          setStep(5);
         }
       }
-    } catch {
-      // ignore
-    }
 
-    try {
-      const rawChat = localStorage.getItem(STORAGE_KEY);
-      let chatLoaded = false;
-      if (rawChat) {
-        const data = JSON.parse(rawChat);
-        if (data.timestamp && (now - data.timestamp < EXPIRATION_MS)) {
-          if (Array.isArray(data.messages)) {
-            setMessages(data.messages);
-            chatLoaded = true;
-          }
-        } else {
-          localStorage.removeItem(STORAGE_KEY);
-        }
-      }
-      
-      if (!chatLoaded) {
-        // seed with a friendly intro
+      const savedMessages = loadCoachChat<CoachChatMessage>();
+      if (savedMessages?.length) {
+        setMessages(savedMessages.map((message) => ({
+          ...message,
+          text: message.role === 'assistant'
+            ? normalizeCoachMarkdown(message.text)
+            : message.text,
+        })));
+      } else {
         setMessages([
           {
             id: uid('a'),
@@ -378,26 +365,24 @@ export default function CoachPage() {
           },
         ]);
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
+
+    window.setTimeout(() => setPersistenceReady(true), 0);
   }, []);
 
   useEffect(() => {
+    if (!persistenceReady) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ messages, timestamp: Date.now() }));
-    } catch {
-      // ignore
-    }
-  }, [messages]);
+      saveCoachChat(messages);
+    } catch {}
+  }, [messages, persistenceReady]);
 
   useEffect(() => {
+    if (!persistenceReady) return;
     try {
-      localStorage.setItem(PROFILE_KEY, JSON.stringify({ profile, draftProfile, timestamp: Date.now() }));
-    } catch {
-      // ignore
-    }
-  }, [profile, draftProfile]);
+      saveCoachProfile(profile, draftProfile);
+    } catch {}
+  }, [profile, draftProfile, persistenceReady]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -488,7 +473,6 @@ export default function CoachPage() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           profile,
-          derived,
           messages: [...messages, userMsg].map((m) => ({ role: m.role, text: m.text })),
         }),
       });
@@ -503,7 +487,7 @@ export default function CoachPage() {
         {
           id: uid('a'),
           role: 'assistant',
-          text: data.adviceMarkdown,
+          text: normalizeCoachMarkdown(data.adviceMarkdown),
           ts: Date.now(),
         },
       ]);
@@ -540,7 +524,7 @@ export default function CoachPage() {
   const prevStep = () => setStep((s) => Math.max(s - 1, 1));
 
   return (
-    <div className="min-h-screen">
+    <div className="cozy-app min-h-screen text-[#55483d] dark:text-[#fff4df]">
       {/* Background wash */}
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute inset-0 bg-linear-to-b from-white via-white to-white dark:from-neutral-950 dark:via-neutral-950 dark:to-neutral-950" />
@@ -1011,9 +995,9 @@ export default function CoachPage() {
                         )}
                       >
                         {m.role === 'assistant' ? (
-                          <div className="coach-markdown prose prose-sm max-w-none dark:prose-invert">
+                          <div className="coach-markdown prose prose-sm max-w-none whitespace-pre-wrap dark:prose-invert">
                             <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
-                              {m.text}
+                              {normalizeCoachMarkdown(m.text)}
                             </ReactMarkdown>
                           </div>
                         ) : (

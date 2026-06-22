@@ -17,7 +17,6 @@ import {
   Plus,
   RotateCw,
   X,
-  Bot,
   Loader2,
   RefreshCw,
   Send,
@@ -33,8 +32,17 @@ import {
 } from 'lucide-react';
 
 import { resolveExerciseDetailFromLabel } from '@/lib/exercises';
+import { localDateKey, safeParseJson, sumFiniteNonNegative } from '@/lib/dailyLog';
+import { normalizeCoachMarkdown } from '@/lib/coachMarkdown';
+import {
+  loadCoachChat,
+  loadCoachProfile,
+  saveCoachChat,
+  saveCoachProfile,
+} from '@/lib/coachPersistence';
 
 import { ConfirmDialog } from './_components/ConfirmDialog';
+import { MochiMascot } from './_components/MochiMascot';
 import type { MealEntry, MealType } from './_components/types/nutrition';
 
 // --- 1. Type Definition ---
@@ -414,6 +422,13 @@ type DailyLog = {
   meals?: MealEntry[];
 };
 
+type CelebrationState = {
+  id: number;
+  title: string;
+  message: string;
+  mood: 'workout' | 'food';
+};
+
 // --- 2. Schedule Data ---
 const SCHEDULE: ScheduleType = {
   1: { title: "Upper Body Beast", focus: "Strength & Hypertrophy", exercises: ["Bench Press (4x8-10)", "Barbell Row (4x10-12)", "Overhead Press (3x10-12)", "Lat Pulldown (3x12-15)", "Dumbbell Lateral Raise (3x15)", "Cardio: Walk 30 min"] },
@@ -436,7 +451,7 @@ const AmbientBackground = React.memo(function AmbientBackground() {
           y: [0, 30, 0],
         }}
         transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
-        className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] rounded-full bg-emerald-100/30 dark:bg-emerald-900/20 blur-[120px]"
+        className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] rounded-full bg-[#f4b89c]/25 dark:bg-[#d98c68]/10 blur-[120px]"
       />
       <motion.div
         animate={{
@@ -446,14 +461,14 @@ const AmbientBackground = React.memo(function AmbientBackground() {
           y: [0, 50, 0],
         }}
         transition={{ duration: 15, repeat: Infinity, ease: 'easeInOut', delay: 2 }}
-        className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-emerald-100/30 dark:bg-green-900/20 blur-[120px]"
+        className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-[#91ad8b]/25 dark:bg-[#91ad8b]/10 blur-[120px]"
       />
       <motion.div
         animate={{
           opacity: [0.1, 0.3, 0.1],
         }}
         transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
-        className="absolute top-[30%] left-[30%] w-[40%] h-[40%] rounded-full bg-emerald-200/10 blur-[100px]"
+        className="absolute top-[30%] left-[30%] w-[40%] h-[40%] rounded-full bg-[#f2cd72]/15 blur-[100px]"
       />
     </div>
   );
@@ -462,9 +477,9 @@ AmbientBackground.displayName = 'AmbientBackground';
 
 const CoachMarkdownMessage = React.memo(function CoachMarkdownMessage({ text }: { text: string }) {
   return (
-    <div className="coach-markdown prose prose-sm prose-neutral dark:prose-invert max-w-none">
+    <div className="coach-markdown prose prose-sm prose-neutral dark:prose-invert max-w-none whitespace-pre-wrap">
       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
-        {text}
+        {normalizeCoachMarkdown(text)}
       </ReactMarkdown>
     </div>
   );
@@ -502,7 +517,7 @@ function FitnessApp() {
   const today = new Date();
   const dayOfWeek = today.getDay();
   const todaySchedule = SCHEDULE[dayOfWeek];
-  const storageKey = `log_${today.toISOString().split('T')[0]}`;
+  const storageKey = `log_${localDateKey(today)}`;
 
   const makeId = () => {
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
@@ -515,7 +530,7 @@ function FitnessApp() {
   });
 
   // --- Theme Logic ---
-  const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>('system');
+  const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>('light');
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -576,18 +591,21 @@ function FitnessApp() {
         meals: [] as MealEntry[]
       };
     }
-    const savedData = localStorage.getItem(storageKey);
-    if (savedData) {
-      const parsed = JSON.parse(savedData) as Partial<DailyLog>;
+    const parsed = safeParseJson<Partial<DailyLog>>(localStorage.getItem(storageKey));
+    if (parsed) {
       const workoutFromStorage = parsed.workout as WorkoutState | undefined;
       const workout = workoutFromStorage && typeof workoutFromStorage === 'object'
         ? workoutFromStorage
         : makeWorkoutState(todaySchedule.exercises);
+      const meals = Array.isArray(parsed.meals) ? parsed.meals : [];
+      const proteinEvents = Array.isArray(parsed.proteinEvents)
+        ? parsed.proteinEvents.filter((event) => event && !event.label?.startsWith('AI:'))
+        : [];
       return {
-        protein: parsed.protein || 0,
-        proteinEvents: (parsed.proteinEvents || []) as ProteinEvent[],
+        protein: sumFiniteNonNegative(proteinEvents.map((event) => event.grams)),
+        proteinEvents,
         workout,
-        meals: (parsed.meals || []) as MealEntry[]
+        meals,
       };
     }
     return {
@@ -609,20 +627,34 @@ function FitnessApp() {
     mealsRef.current = meals;
   }, [meals]);
 
-  const [activeTab, setActiveTab] = useState<'workout' | 'nutrition' | 'protein' | 'coach'>('workout');
+  const [activeTab, setActiveTab] = useState<'workout' | 'nutrition' | 'protein'>('workout');
+  const [coachOpen, setCoachOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const saved = window.localStorage.getItem(MOBILE_TAB_STORAGE_KEY);
-    if (saved === 'workout' || saved === 'nutrition' || saved === 'protein' || saved === 'coach') {
+    if (saved === 'workout' || saved === 'nutrition' || saved === 'protein') {
       setActiveTab(saved);
+    } else if (saved === 'coach') {
+      setCoachOpen(true);
     }
   }, []);
 
-  // --- Coach Logic ---
-  const COACH_STORAGE_KEY = 'coach_chat_v1';
-  const COACH_PROFILE_KEY = 'coach_profile_v1';
+  useEffect(() => {
+    if (!coachOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setCoachOpen(false);
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [coachOpen]);
 
+  // --- Coach Logic ---
   const [coachStep, setCoachStep] = useState(1);
   const [coachProfile, setCoachProfile] = useState<CoachProfile>({
     sex: 'male',
@@ -669,7 +701,9 @@ function FitnessApp() {
   const [coachMessages, setCoachMessages] = useState<CoachChatMessage[]>([]);
   const [coachDraft, setCoachDraft] = useState('');
   const [coachFollowUps, setCoachFollowUps] = useState<string[]>([]);
+  const [coachPersistenceReady, setCoachPersistenceReady] = useState(false);
   const coachMessagesEndRef = useRef<HTMLDivElement | null>(null);
+  const coachInputRef = useRef<HTMLInputElement | null>(null);
 
   const parseOptionalNumber = (raw: string, opts?: { min?: number; max?: number }) => {
     const t = raw.trim().replace(',', '.');
@@ -687,41 +721,30 @@ function FitnessApp() {
   };
 
   useEffect(() => {
-    const now = Date.now();
-    const EXPIRATION_MS = 24 * 60 * 60 * 1000;
-
     try {
-      const rawProfile = localStorage.getItem(COACH_PROFILE_KEY);
-      if (rawProfile) {
-        const data = JSON.parse(rawProfile);
-        if (data.timestamp && (now - data.timestamp < EXPIRATION_MS)) {
-          if (data.profile) setCoachProfile(data.profile);
-          if (data.draftProfile) setDraftProfile(data.draftProfile);
-          if (data.profile?.ageYears && data.profile?.heightCm && data.profile?.weightKg && data.profile?.goal) {
-            setCoachStep(5);
-          }
-        } else {
-          localStorage.removeItem(COACH_PROFILE_KEY);
+      const savedProfile = loadCoachProfile<CoachProfile, Draft>();
+      if (savedProfile) {
+        setCoachProfile(savedProfile.profile);
+        if (savedProfile.draftProfile) setDraftProfile(savedProfile.draftProfile);
+        if (
+          savedProfile.profile.ageYears
+          && savedProfile.profile.heightCm
+          && savedProfile.profile.weightKg
+          && savedProfile.profile.goal
+        ) {
+          setCoachStep(5);
         }
       }
-    } catch {}
 
-    try {
-      const rawChat = localStorage.getItem(COACH_STORAGE_KEY);
-      let chatLoaded = false;
-      if (rawChat) {
-        const data = JSON.parse(rawChat);
-        if (data.timestamp && (now - data.timestamp < EXPIRATION_MS)) {
-          if (Array.isArray(data.messages)) {
-            setCoachMessages(data.messages);
-            chatLoaded = true;
-          }
-        } else {
-          localStorage.removeItem(COACH_STORAGE_KEY);
-        }
-      }
-      
-      if (!chatLoaded) {
+      const savedMessages = loadCoachChat<CoachChatMessage>();
+      if (savedMessages?.length) {
+        setCoachMessages(savedMessages.map((message) => ({
+          ...message,
+          text: message.role === 'assistant'
+            ? normalizeCoachMarkdown(message.text)
+            : message.text,
+        })));
+      } else {
         setCoachMessages([
           {
             id: uid('a'),
@@ -732,23 +755,33 @@ function FitnessApp() {
         ]);
       }
     } catch {}
+
+    window.setTimeout(() => setCoachPersistenceReady(true), 0);
   }, []);
 
   useEffect(() => {
+    if (!coachPersistenceReady) return;
     try {
-      localStorage.setItem(COACH_STORAGE_KEY, JSON.stringify({ messages: coachMessages, timestamp: Date.now() }));
+      saveCoachChat(coachMessages);
     } catch {}
-  }, [coachMessages]);
+  }, [coachMessages, coachPersistenceReady]);
 
   useEffect(() => {
+    if (!coachPersistenceReady) return;
     try {
-      localStorage.setItem(COACH_PROFILE_KEY, JSON.stringify({ profile: coachProfile, draftProfile, timestamp: Date.now() }));
+      saveCoachProfile(coachProfile, draftProfile);
     } catch {}
-  }, [coachProfile, draftProfile]);
+  }, [coachProfile, draftProfile, coachPersistenceReady]);
 
   useEffect(() => {
     coachMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [coachMessages.length, coachFollowUps.length, coachSubmitting, activeTab]);
+  }, [coachMessages.length, coachFollowUps.length, coachSubmitting, activeTab, coachOpen]);
+
+  useEffect(() => {
+    if (!coachOpen || coachStep !== 5) return;
+    const timer = window.setTimeout(() => coachInputRef.current?.focus(), 180);
+    return () => window.clearTimeout(timer);
+  }, [coachOpen, coachStep]);
 
   const coachDerived = useMemo(() => {
     const heightCm = coachProfile.heightCm ?? 0;
@@ -834,7 +867,6 @@ function FitnessApp() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           profile: coachProfile,
-          derived: coachDerived,
           messages: [...coachMessages, userMsg].map((m) => ({ role: m.role, text: m.text })),
         }),
       });
@@ -850,7 +882,7 @@ function FitnessApp() {
         {
           id: uid('a'),
           role: 'assistant',
-          text: data.adviceMarkdown,
+          text: normalizeCoachMarkdown(data.adviceMarkdown),
           ts: Date.now(),
         },
       ]);
@@ -906,8 +938,20 @@ function FitnessApp() {
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiResponse, setAiResponse] = useState<AiNutritionResponse | null>(null);
   const [aiMealType] = useState<MealType>('lunch');
-  const lastAiMealProteinCreditRef = useRef<string | null>(null);
 
+  useEffect(() => {
+    if (!aiOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setAiOpen(false);
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [aiOpen]);
   const [saveSuccessOpen, setSaveSuccessOpen] = useState<boolean>(false);
   const saveSuccessTimerRef = useRef<number | null>(null);
 
@@ -927,7 +971,11 @@ function FitnessApp() {
   const flushSave = () => {
     if (typeof window === 'undefined') return;
     if (!pendingSaveRef.current) return;
-    localStorage.setItem(storageKey, JSON.stringify(pendingSaveRef.current));
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(pendingSaveRef.current));
+    } catch {
+      // Storage can be unavailable in private mode or when the quota is full.
+    }
     pendingSaveRef.current = null;
     if (saveTimerRef.current) {
       window.clearTimeout(saveTimerRef.current);
@@ -952,8 +1000,20 @@ function FitnessApp() {
     }, 250);
   };
 
+  const [celebration, setCelebration] = useState<CelebrationState | null>(null);
+  const celebrationTimerRef = useRef<number | null>(null);
+  const proteinGoalCelebratedRef = useRef(false);
+
+  const celebrate = useCallback((next: Omit<CelebrationState, 'id'>) => {
+    if (celebrationTimerRef.current) window.clearTimeout(celebrationTimerRef.current);
+    setCelebration({ ...next, id: Date.now() });
+    celebrationTimerRef.current = window.setTimeout(() => {
+      setCelebration(null);
+      celebrationTimerRef.current = null;
+    }, 2400);
+  }, []);
+
   const addProtein = (event: Omit<ProteinEvent, 'id' | 'ts'>) => {
-    const newProtein = protein + event.grams;
     const ts = new Date().getTime();
     const newEvent: ProteinEvent = {
       id: makeId(),
@@ -961,12 +1021,11 @@ function FitnessApp() {
       ...event
     };
     const newEvents = [newEvent, ...proteinEvents].slice(0, 50);
+    const newProtein = sumFiniteNonNegative(newEvents.map((item) => item.grams));
     setProtein(newProtein);
     setProteinEvents(newEvents);
     scheduleSave(newProtein, newEvents, workoutState, mealsRef.current);
   };
-
-  const progress = Math.min((protein / 180) * 100, 100);
 
   const bumpExercise = (exercise: string, delta: 1 | -1) => {
     setWorkoutState(prev => {
@@ -974,6 +1033,13 @@ function FitnessApp() {
       const nextCount = Math.max(0, Math.min(current.target, current.count + delta));
       const next = { ...prev, [exercise]: { ...current, count: nextCount } };
       scheduleSave(protein, proteinEvents, next, mealsRef.current);
+      if (delta === 1 && current.count < current.target && nextCount >= current.target) {
+        window.setTimeout(() => celebrate({
+          title: 'ครบเซตแล้ว!',
+          message: 'พักหายใจนิดหนึ่ง แล้วค่อยไปต่ออย่างสบาย ๆ',
+          mood: 'workout',
+        }), 0);
+      }
       return next;
     });
   };
@@ -1013,29 +1079,8 @@ function FitnessApp() {
     }
   };
 
-  const addProteinFromAi = (r: AiNutritionResult) => {
-    const grams = r.proteinG ?? 0;
-    if (!grams || grams <= 0) return;
-    addProtein({
-      label: `AI: ${r.itemName}`,
-      grams: Math.round(grams),
-      category: 'whole_food',
-      calories: r.caloriesKcal ?? 0,
-      carbs: r.carbsG ?? 0,
-      fat: r.fatG ?? 0,
-    });
-  };
-
   const saveAiAsMeal = () => {
     if (!aiResponse?.results || aiResponse.results.length === 0) return;
-
-    const proteinFingerprint = `${aiMealType}::${aiText.trim()}::${aiResponse.results
-      .map((r) => `${r.itemName}:${r.proteinG ?? 0}`)
-      .join('|')}`;
-    if (lastAiMealProteinCreditRef.current !== proteinFingerprint) {
-      lastAiMealProteinCreditRef.current = proteinFingerprint;
-      for (const r of aiResponse.results) addProteinFromAi(r);
-    }
 
     const newMeal: MealEntry = {
       id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
@@ -1104,11 +1149,17 @@ function FitnessApp() {
     };
   }, [meals]);
 
+  const totalProtein = protein + mealTotals.proteinG;
+  const proteinGoal = coachProfile.weightKg
+    ? coachDerived.proteinRange[1]
+    : 180;
+  const progress = Math.min((totalProtein / proteinGoal) * 100, 100);
+
   const proteinItems = useMemo(() => (
     [
-      { label: 'Whey Scoop', grams: 25, calories: 120, icon: Dumbbell, desc: 'Supplement', category: 'supplement' as const },
-      { label: 'Chicken Breast', grams: 23, calories: 120, icon: Utensils, desc: 'Whole food', category: 'whole_food' as const },
-      { label: 'Boiled Egg', grams: 7, calories: 75, icon: Flame, desc: 'Snack', category: 'snack' as const },
+      { label: 'เวย์ 1 สกู๊ป', grams: 25, calories: 120, icon: Dumbbell, desc: 'อาหารเสริม', category: 'supplement' as const },
+      { label: 'อกไก่', grams: 23, calories: 120, icon: Utensils, desc: 'อาหารธรรมชาติ', category: 'whole_food' as const },
+      { label: 'ไข่ต้ม', grams: 7, calories: 75, icon: Flame, desc: 'มื้อว่าง', category: 'snack' as const },
     ]
   ), []);
 
@@ -1122,7 +1173,7 @@ function FitnessApp() {
   };
 
   const prefersReducedMotion = usePrefersReducedMotion();
-  const proteinAnimated = useAnimatedNumber(protein);
+  const proteinAnimated = useAnimatedNumber(totalProtein);
   const kcalAnimated = useAnimatedNumber(mealTotals.caloriesKcal);
   const pAnimated = useAnimatedNumber(mealTotals.proteinG);
   const cAnimated = useAnimatedNumber(mealTotals.carbsG);
@@ -1130,6 +1181,23 @@ function FitnessApp() {
 
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const [mealToDelete, setMealToDelete] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (progress >= 100 && !proteinGoalCelebratedRef.current) {
+      proteinGoalCelebratedRef.current = true;
+      celebrate({
+        title: 'โปรตีนถึงเป้าแล้ว!',
+        message: 'Mochi ภูมิใจในตัวคุณมาก เก่งสุด ๆ เลย',
+        mood: 'food',
+      });
+    } else if (progress < 95) {
+      proteinGoalCelebratedRef.current = false;
+    }
+  }, [progress, celebrate]);
+
+  useEffect(() => () => {
+    if (celebrationTimerRef.current) window.clearTimeout(celebrationTimerRef.current);
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1140,23 +1208,24 @@ function FitnessApp() {
   }, [activeTab, isMobile, prefersReducedMotion, aiOpen, selectedExerciseLabel]);
 
   return (
-    <div className="min-h-screen bg-white dark:bg-[#050a08] text-neutral-900 dark:text-white selection:bg-emerald-500/30 font-sans transition-colors duration-500 ease-in-out">
+    <div className="cozy-app min-h-screen text-neutral-900 dark:text-white selection:bg-[#d98c68]/25 font-sans transition-colors duration-500 ease-in-out">
       <AmbientBackground />
 
       {/* Header (Mobile Only) */}
-      <header className="md:hidden fixed top-0 inset-x-0 z-30 border-b border-emerald-900/5 dark:border-white/5 bg-white/80 dark:bg-[#050a08]/80 backdrop-blur-xl transition-colors duration-500 ease-in-out">
+      <header className="md:hidden fixed top-0 inset-x-0 z-30 border-b border-[#8f765d]/10 dark:border-white/5 bg-[#fff8ed]/85 dark:bg-[#342d27]/88 backdrop-blur-xl transition-colors duration-500 ease-in-out">
         <div className="max-w-md mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-linear-to-br from-emerald-500 to-emerald-700 flex items-center justify-center shadow-[0_0_15px_rgba(16,185,129,0.3)]">
-              <Activity className="w-5 h-5 text-white" />
-            </div>
-            <span className="font-bold text-lg tracking-tight text-neutral-900 dark:text-white">FitSync</span>
+            <MochiMascot size="sm" />
+            <span className="font-black text-lg tracking-tight text-[#55483d] dark:text-[#fff4df]">
+              Fit<span className="text-[#b66f50] dark:text-[#f2b095]">Sync</span>
+            </span>
           </div>
           <div className="flex items-center gap-3">
              {/* Theme Toggles */}
              <div className="flex items-center gap-1 bg-emerald-900/5 dark:bg-white/5 rounded-full p-1 border border-emerald-900/5 dark:border-white/5 backdrop-blur-sm">
                 <button
                   onClick={toggleTheme}
+                  aria-label="สลับธีมสว่างและมืด"
                   className="p-1.5 rounded-full text-emerald-900/60 dark:text-emerald-100/60 hover:text-emerald-900 dark:hover:text-white transition-colors relative overflow-hidden"
                 >
                   <AnimatePresence mode="wait" initial={false}>
@@ -1175,13 +1244,12 @@ function FitnessApp() {
 
              <button 
                 onClick={() => setConfirmResetOpen(true)}
+                aria-label="รีเซ็ตข้อมูลวันนี้"
                 className="p-2 rounded-full hover:bg-emerald-900/5 dark:hover:bg-white/5 text-emerald-900/60 dark:text-emerald-100/60 hover:text-emerald-900 dark:hover:text-white transition-colors"
              >
                 <RotateCw className="w-5 h-5" />
              </button>
-             <div className="w-8 h-8 rounded-full bg-neutral-900 border border-white/10 overflow-hidden">
-                <div className="w-full h-full bg-linear-to-tr from-emerald-900 to-neutral-800" />
-             </div>
+             <div className="hidden rounded-full bg-[#f1e4cf] px-3 py-1 text-[10px] font-bold text-[#8a6b55] sm:block dark:bg-white/5 dark:text-[#dbc8ac]">โหมดดูแลใจและกาย</div>
           </div>
         </div>
       </header>
@@ -1190,19 +1258,22 @@ function FitnessApp() {
       <div className="max-w-7xl mx-auto p-4 md:p-8 pt-20 md:pt-8 grid grid-cols-1 md:grid-cols-12 gap-8">
 
         {/* Desktop Navigation (Left Sidebar) */}
-        <nav className="hidden md:flex md:col-span-3 lg:col-span-2 flex-col gap-6 sticky top-8 h-fit">
+        <nav className="cozy-surface hidden md:flex md:col-span-3 lg:col-span-2 flex-col gap-6 sticky top-8 h-fit rounded-[2rem] p-4">
           <div className="flex items-center gap-3 px-2 mb-4">
-            <div className="w-10 h-10 rounded-xl bg-linear-to-br from-emerald-500 to-emerald-700 flex items-center justify-center shadow-[0_0_15px_rgba(16,185,129,0.3)]">
-              <Activity className="w-6 h-6 text-white" />
+            <MochiMascot />
+            <div>
+              <span className="font-black text-xl tracking-tight text-[#55483d] dark:text-[#fff4df]">
+                Fit<span className="text-[#b66f50] dark:text-[#f2b095]">Sync</span>
+              </span>
+              <div className="text-[10px] font-bold tracking-wide text-[#a17c62] dark:text-[#cdb99d]">สุขภาพดี แบบใจดีกับตัวเอง</div>
             </div>
-            <span className="font-bold text-xl tracking-tight text-neutral-900 dark:text-white">FitSync</span>
           </div>
 
           <div className="space-y-2">
             {[
-              { id: 'workout', icon: Dumbbell, label: 'Workout' },
-              { id: 'nutrition', icon: Utensils, label: 'Nutrition' },
-              { id: 'protein', icon: Zap, label: 'Quick Add' },
+              { id: 'workout', icon: Dumbbell, label: 'ออกกำลังกาย' },
+              { id: 'nutrition', icon: Utensils, label: 'โภชนาการ' },
+              { id: 'protein', icon: Zap, label: 'เพิ่มโปรตีน' },
             ].map((tab) => {
               const isActive = activeTab === tab.id;
               return (
@@ -1211,29 +1282,17 @@ function FitnessApp() {
                   onClick={() => setActiveTab(tab.id as 'workout' | 'nutrition' | 'protein')}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-500 ease-in-out ${
                     isActive 
-                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold shadow-[0_0_15px_rgba(16,185,129,0.1)] border border-emerald-500/20' 
+                      ? 'border border-[#d98c68]/25 bg-[#d98c68]/12 font-bold text-[#a96550] shadow-[0_8px_20px_rgba(177,105,75,0.1)] dark:text-[#f2b095]'
                       : 'text-emerald-900/60 dark:text-emerald-100/60 hover:bg-emerald-900/5 dark:hover:bg-white/5 hover:text-neutral-900 dark:hover:text-white'
                   }`}
                 >
-                  <tab.icon className={`w-5 h-5 ${isActive ? 'text-emerald-400 drop-shadow-[0_0_5px_rgba(16,185,129,0.5)]' : ''}`} />
+                  <tab.icon className={`w-5 h-5 ${isActive ? 'text-[#b66f50] dark:text-[#f2b095]' : ''}`} />
                   <span>{tab.label}</span>
-                  {isActive && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_5px_#34d399]" />}
+                  {isActive && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-[#d98c68]" />}
                 </button>
               );
             })}
 
-            <button
-              onClick={() => setActiveTab('coach')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-500 ease-in-out ${
-                activeTab === 'coach'
-                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold shadow-[0_0_15px_rgba(16,185,129,0.1)] border border-emerald-500/20'
-                  : 'text-emerald-900/60 dark:text-emerald-100/60 hover:bg-emerald-900/5 dark:hover:bg-white/5 hover:text-neutral-900 dark:hover:text-white'
-              }`}
-            >
-              <Bot className={`w-5 h-5 ${activeTab === 'coach' ? 'text-emerald-400 drop-shadow-[0_0_5px_rgba(16,185,129,0.5)]' : ''}`} />
-              <span>AI Coach</span>
-              {activeTab === 'coach' && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_5px_#34d399]" />}
-            </button>
           </div>
 
           <div className="pt-6 mt-auto border-t border-emerald-900/5 dark:border-white/5 space-y-3">
@@ -1266,15 +1325,36 @@ function FitnessApp() {
                 className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-emerald-900/60 dark:text-emerald-100/60 hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 transition-colors"
              >
                 <RotateCw className="w-5 h-5" />
-                <span className="font-medium">Reset Day</span>
+                <span className="font-medium">เริ่มข้อมูลวันนี้ใหม่</span>
              </button>
           </div>
         </nav>
 
         {/* Center Content (Main Feed) */}
         <main className="md:col-span-5 lg:col-span-7 space-y-6 order-2 md:order-1 min-w-0">
+          <motion.section
+            initial={prefersReducedMotion ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="cozy-surface relative overflow-hidden rounded-[2rem] p-5 sm:p-6"
+          >
+            <div className="absolute -right-8 -top-10 h-32 w-32 rounded-full bg-[#f2cd72]/25 blur-2xl" />
+            <div className="absolute -bottom-12 right-20 h-32 w-32 rounded-full bg-[#f4b89c]/20 blur-2xl" />
+            <div className="relative flex items-center gap-4">
+              <MochiMascot mood={activeTab === 'workout' ? 'workout' : activeTab === 'nutrition' ? 'food' : 'hello'} size="lg" />
+              <div className="min-w-0">
+                <div className="text-xs font-extrabold tracking-[0.18em] text-[#a17c62] uppercase dark:text-[#d4bfa2]">ความก้าวหน้าเล็ก ๆ ของวันนี้</div>
+                <h1 className="mt-1 text-xl font-black tracking-tight text-[#55483d] sm:text-2xl dark:text-[#fff4df]">
+                  ค่อย ๆ ไป แต่ไปด้วยกันนะ
+                </h1>
+                <p className="mt-1 text-sm text-[#7d6b5d] dark:text-[#d7c5aa]">
+                  วันนี้คือ <span className="font-bold text-[#b66f50] dark:text-[#f2b095]">{todaySchedule.title}</span> — ทำเท่าที่ไหวก็ถือว่าเก่งมากแล้ว
+                </p>
+              </div>
+            </div>
+          </motion.section>
+
           {/* Tab Content */}
-          <AnimatePresence mode="wait">
+          <AnimatePresence mode="wait" initial={false}>
 
           {activeTab === 'workout' && (
             <motion.div
@@ -1286,8 +1366,8 @@ function FitnessApp() {
               className="space-y-4"
             >
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold text-neutral-900 dark:text-white">Today&apos;s Plan</h2>
-                <span className="text-xs font-medium text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded-lg border border-emerald-400/20 shadow-[0_0_10px_rgba(52,211,153,0.1)]">
+                <h2 className="text-xl font-bold text-neutral-900 dark:text-white">แผนของวันนี้</h2>
+                <span className="rounded-lg border border-[#d98c68]/20 bg-[#d98c68]/10 px-2 py-1 text-xs font-bold text-[#a96550] dark:text-[#f2b095]">
                   {todaySchedule.title}
                 </span>
               </div>
@@ -1304,29 +1384,29 @@ function FitnessApp() {
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: i * 0.05 }}
                       onClick={() => setSelectedExerciseLabel(ex)}
-                      className={`group relative overflow-hidden rounded-2xl border p-4 transition-all duration-500 ease-in-out active:scale-[0.98] h-full backdrop-blur-md
+                      className={`group relative overflow-hidden rounded-[1.5rem] border p-4 transition-all duration-500 ease-in-out active:scale-[0.98] h-full backdrop-blur-md
                         ${done 
-                          ? 'bg-emerald-100/40 dark:bg-emerald-950/40 border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.1)]' 
-                          : 'bg-white/60 dark:bg-[#0a120f]/60 border-emerald-900/5 dark:border-white/5 hover:border-emerald-900/10 dark:hover:border-white/10 hover:bg-white/80 dark:hover:bg-[#0a120f]/80'
+                          ? 'border-[#d98c68]/28 bg-[#fae9dd] shadow-[0_12px_28px_rgba(177,105,75,0.1)] dark:border-[#d98c68]/25 dark:bg-[#60483b]/60'
+                          : 'bg-[#fffdf8]/85 dark:bg-[#443a32]/80 border-[#8f765d]/10 dark:border-white/5 hover:border-[#d98c68]/25 hover:-translate-y-0.5 hover:shadow-[0_14px_32px_rgba(105,82,57,0.1)]'
                         }`}
                     >
                       <div className="flex items-center gap-4 h-full">
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all shrink-0
                           ${done 
-                            ? 'bg-emerald-500 border-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)]' 
+                            ? 'border-[#d98c68] bg-[#d98c68] text-white shadow-[0_8px_18px_rgba(177,105,75,0.25)]'
                             : 'border-emerald-900/10 dark:border-white/10 bg-emerald-900/5 dark:bg-white/5 text-emerald-900/40 dark:text-emerald-100/40'
                           }`}>
                           {done ? <CheckCircle2 className="w-5 h-5" /> : <span className="text-sm font-bold">{i + 1}</span>}
                         </div>
                         
                         <div className="flex-1 min-w-0">
-                          <h3 className={`font-bold text-base truncate transition-colors ${done ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-900 dark:text-white'}`}>
+                          <h3 className={`font-bold text-base truncate transition-colors ${done ? 'text-[#a96550] dark:text-[#f2b095]' : 'text-neutral-900 dark:text-white'}`}>
                             {ex}
                           </h3>
                           <div className="flex items-center gap-2 mt-1">
                             <div className="h-1.5 flex-1 bg-neutral-200 dark:bg-neutral-800 rounded-full overflow-hidden">
                               <motion.div 
-                                className="h-full bg-emerald-500 shadow-[0_0_10px_#10b981]"
+                                className="h-full bg-[#d98c68]"
                                 initial={{ width: 0 }}
                                 animate={{ width: `${(item.count / item.target) * 100}%` }}
                               />
@@ -1381,7 +1461,7 @@ function FitnessApp() {
               transition={{ duration: 0.2 }}
               className="space-y-4"
              >
-                <h2 className="text-xl font-bold text-neutral-900 dark:text-white">Quick Add</h2>
+                <h2 className="text-xl font-bold text-neutral-900 dark:text-white">เพิ่มโปรตีนด่วน</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {proteinItems.map((item, idx) => (
                     <button
@@ -1396,13 +1476,15 @@ function FitnessApp() {
                         <div className="font-bold text-neutral-900 dark:text-white">{item.label}</div>
                         <div className="text-xs text-emerald-900/40 dark:text-emerald-100/40">{item.desc}</div>
                       </div>
-                      <div className="text-emerald-600 dark:text-emerald-400 font-bold text-lg drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">+{item.grams}g</div>
+                      <div className="shrink-0 text-lg font-extrabold tracking-tight text-[#b66f50] transition-colors duration-300 group-hover:text-[#a75f43] dark:text-[#f2b095] dark:group-hover:text-[#ffc3aa]">
+                        +{item.grams}g
+                      </div>
                     </button>
                   ))}
                 </div>
 
                 <div className="pt-4 border-t border-emerald-900/10 dark:border-white/10">
-                   <h3 className="text-sm font-bold text-emerald-900/40 dark:text-emerald-100/40 mb-3">Recent Log</h3>
+                   <h3 className="text-sm font-bold text-emerald-900/40 dark:text-emerald-100/40 mb-3">รายการล่าสุด</h3>
                    <div className="space-y-2">
                       {proteinEvents.slice(0, 5).map(ev => (
                          <div key={ev.id} className="flex items-center justify-between p-3 rounded-xl bg-white/40 dark:bg-[#0a120f]/40 border border-emerald-900/5 dark:border-white/5 hover:border-emerald-500/20 transition-colors duration-500 ease-in-out">
@@ -1410,33 +1492,73 @@ function FitnessApp() {
                             <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">+{ev.grams}g</span>
                          </div>
                       ))}
-                      {proteinEvents.length === 0 && <div className="text-sm text-emerald-900/40 dark:text-emerald-100/40 text-center py-4">No entries yet</div>}
+                      {proteinEvents.length === 0 && <div className="text-sm text-emerald-900/40 dark:text-emerald-100/40 text-center py-4">ยังไม่มีรายการ</div>}
                    </div>
                 </div>
              </motion.div>
           )}
 
-          {activeTab === 'coach' && (
+          </AnimatePresence>
+
+          <AnimatePresence>
+          {coachOpen && (
             <motion.div
               key="coach"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.2 }}
-              className="space-y-6 pb-32 md:pb-0"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className="fixed inset-0 z-60 flex items-end justify-end bg-black/35 p-0 backdrop-blur-[2px] sm:p-5"
+              onClick={() => setCoachOpen(false)}
             >
+              <motion.aside
+                role="dialog"
+                aria-modal="true"
+                aria-label="AI Coach chat"
+                initial={{ opacity: 0, y: 30, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 30, scale: 0.96 }}
+                transition={{ type: 'spring', stiffness: 360, damping: 30 }}
+                onClick={(event) => event.stopPropagation()}
+                className="flex h-dvh w-full flex-col overflow-hidden bg-[#fffdf8] shadow-2xl dark:bg-[#443a32] sm:h-[min(820px,calc(100vh-2.5rem))] sm:max-w-xl sm:rounded-4xl sm:border sm:border-[#8f765d]/12 sm:dark:border-white/10"
+              >
+                <div className="z-20 flex shrink-0 items-center justify-between border-b border-[#8f765d]/10 bg-[#fff8ed]/92 px-5 py-4 backdrop-blur-xl dark:border-white/5 dark:bg-[#443a32]/92">
+                  <div className="flex items-center gap-3">
+                    <div className="relative grid h-11 w-11 place-items-center">
+                      <MochiMascot mood="coach" />
+                      <span className="absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-white bg-[#f2cd72] dark:border-[#443a32]" />
+                    </div>
+                    <div>
+                      <div className="font-extrabold text-neutral-900 dark:text-white">AI Coach</div>
+                      <div className="text-xs font-medium text-emerald-600 dark:text-emerald-400">พร้อมช่วยคุณเสมอ</div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCoachOpen(false)}
+                    aria-label="ย่อหน้าต่าง AI Coach"
+                    className="grid h-10 w-10 place-items-center rounded-full bg-emerald-900/5 text-emerald-900/60 transition hover:bg-emerald-900/10 hover:text-neutral-900 dark:bg-white/5 dark:text-emerald-100/60 dark:hover:bg-white/10 dark:hover:text-white"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <div className={coachStep === 5
+                  ? 'min-h-0 flex-1 overflow-hidden p-3 sm:p-4'
+                  : 'min-h-0 flex-1 space-y-6 overflow-y-auto p-4 pb-8 sm:p-5'
+                }>
               {/* Step 1: Basic Info */}
               {coachStep === 1 && (
                 <div className="space-y-6">
                   <div className="text-center">
-                    <h1 className="text-2xl font-bold text-neutral-900 dark:text-white">Let&apos;s Start</h1>
-                    <p className="mt-2 text-sm text-emerald-900/60 dark:text-emerald-100/60">Basic info for your plan</p>
+                    <h1 className="text-2xl font-bold text-neutral-900 dark:text-white">มาเริ่มกันเลย</h1>
+                    <p className="mt-2 text-sm text-emerald-900/60 dark:text-emerald-100/60">ข้อมูลพื้นฐานสำหรับวางแผนให้เหมาะกับคุณ</p>
                   </div>
 
                   <div className="rounded-3xl border border-emerald-900/10 dark:border-white/10 bg-white/60 dark:bg-[#0a120f]/60 p-6 backdrop-blur-md transition-colors duration-500 ease-in-out">
                     <div className="space-y-6">
                       <div className="space-y-3">
-                        <label className="text-sm font-bold text-neutral-900 dark:text-white">Sex</label>
+                        <label className="text-sm font-bold text-neutral-900 dark:text-white">เพศ</label>
                         <div className="grid grid-cols-2 gap-3">
                           <button
                             type="button"
@@ -1448,7 +1570,7 @@ function FitnessApp() {
                             }`}
                           >
                             <User className="h-8 w-8" />
-                            <span className="font-bold">Male</span>
+                            <span className="font-bold">ชาย</span>
                           </button>
                           <button
                             type="button"
@@ -1460,14 +1582,14 @@ function FitnessApp() {
                             }`}
                           >
                             <User className="h-8 w-8" />
-                            <span className="font-bold">Female</span>
+                            <span className="font-bold">หญิง</span>
                           </button>
                         </div>
                       </div>
 
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                         <label className="space-y-2">
-                          <div className="text-sm font-bold text-neutral-900 dark:text-white">Age (Years)</div>
+                          <div className="text-sm font-bold text-neutral-900 dark:text-white">อายุ (ปี)</div>
                           <input
                             inputMode="numeric"
                             placeholder="25"
@@ -1478,7 +1600,7 @@ function FitnessApp() {
                           />
                         </label>
                         <label className="space-y-2">
-                          <div className="text-sm font-bold text-neutral-900 dark:text-white">Height (cm)</div>
+                          <div className="text-sm font-bold text-neutral-900 dark:text-white">ส่วนสูง (ซม.)</div>
                           <input
                             inputMode="numeric"
                             placeholder="170"
@@ -1489,7 +1611,7 @@ function FitnessApp() {
                           />
                         </label>
                         <label className="space-y-2">
-                          <div className="text-sm font-bold text-neutral-900 dark:text-white">Weight (kg)</div>
+                          <div className="text-sm font-bold text-neutral-900 dark:text-white">น้ำหนัก (กก.)</div>
                           <input
                             inputMode="numeric"
                             placeholder="70"
@@ -1512,7 +1634,7 @@ function FitnessApp() {
                         : 'cursor-not-allowed bg-emerald-900/5 dark:bg-white/5 text-emerald-900/20 dark:text-emerald-100/20'
                     }`}
                   >
-                    Next <ChevronRight className="h-5 w-5" />
+                    ต่อไป <ChevronRight className="h-5 w-5" />
                   </button>
                 </div>
               )}
@@ -1521,8 +1643,8 @@ function FitnessApp() {
               {coachStep === 2 && (
                 <div className="space-y-6">
                   <div className="text-center">
-                    <h1 className="text-2xl font-bold text-neutral-900 dark:text-white">Activity Level</h1>
-                    <p className="mt-2 text-sm text-emerald-900/60 dark:text-emerald-100/60">Helps calculate your metabolism</p>
+                    <h1 className="text-2xl font-bold text-neutral-900 dark:text-white">ระดับกิจกรรม</h1>
+                    <p className="mt-2 text-sm text-emerald-900/60 dark:text-emerald-100/60">ช่วยคำนวณพลังงานที่ใช้ต่อวันได้เหมาะสมขึ้น</p>
                   </div>
 
                   <div className="space-y-4">
@@ -1543,11 +1665,11 @@ function FitnessApp() {
                         </div>
                         <div>
                           <div className={`font-bold ${coachProfile.activity === k ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-900 dark:text-white"}`}>
-                            {k === 'sedentary' && 'Sedentary'}
-                            {k === 'light' && 'Lightly Active'}
-                            {k === 'moderate' && 'Moderately Active'}
-                            {k === 'active' && 'Very Active'}
-                            {k === 'athlete' && 'Athlete'}
+                            {k === 'sedentary' && 'ขยับตัวน้อย'}
+                            {k === 'light' && 'ออกกำลังเล็กน้อย'}
+                            {k === 'moderate' && 'ออกกำลังสม่ำเสมอ'}
+                            {k === 'active' && 'ออกกำลังหนัก'}
+                            {k === 'athlete' && 'นักกีฬา'}
                           </div>
                           <div className="text-xs text-emerald-900/40 dark:text-emerald-100/40">{activityLabelTh(k as ActivityLevel)}</div>
                         </div>
@@ -1567,7 +1689,7 @@ function FitnessApp() {
                       onClick={nextCoachStep}
                       className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-500 text-base font-bold text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] transition hover:bg-emerald-600"
                     >
-                      Next <ChevronRight className="h-5 w-5" />
+                      ต่อไป <ChevronRight className="h-5 w-5" />
                     </button>
                   </div>
                 </div>
@@ -1577,14 +1699,14 @@ function FitnessApp() {
               {coachStep === 3 && (
                 <div className="space-y-6">
                   <div className="text-center">
-                    <h1 className="text-2xl font-bold text-neutral-900 dark:text-white">Body Stats</h1>
-                    <p className="mt-2 text-sm text-emerald-900/60 dark:text-emerald-100/60">Optional, for body fat calculation</p>
+                    <h1 className="text-2xl font-bold text-neutral-900 dark:text-white">สัดส่วนร่างกาย</h1>
+                    <p className="mt-2 text-sm text-emerald-900/60 dark:text-emerald-100/60">ไม่บังคับ ใช้ช่วยประมาณเปอร์เซ็นต์ไขมัน</p>
                   </div>
 
                   <div className="rounded-3xl border border-emerald-900/10 dark:border-white/10 bg-white/60 dark:bg-[#0a120f]/60 p-6 backdrop-blur-md transition-colors duration-500 ease-in-out">
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <label className="space-y-2">
-                        <div className="text-sm font-bold text-neutral-900 dark:text-white">Waist (in)</div>
+                        <div className="text-sm font-bold text-neutral-900 dark:text-white">รอบเอว (นิ้ว)</div>
                         <input
                           inputMode="decimal"
                           placeholder="32"
@@ -1595,7 +1717,7 @@ function FitnessApp() {
                         />
                       </label>
                       <label className="space-y-2">
-                        <div className="text-sm font-bold text-neutral-900 dark:text-white">Hip (in)</div>
+                        <div className="text-sm font-bold text-neutral-900 dark:text-white">รอบสะโพก (นิ้ว)</div>
                         <input
                           inputMode="decimal"
                           placeholder="38"
@@ -1606,7 +1728,7 @@ function FitnessApp() {
                         />
                       </label>
                       <label className="space-y-2">
-                        <div className="text-sm font-bold text-neutral-900 dark:text-white">Chest (in)</div>
+                        <div className="text-sm font-bold text-neutral-900 dark:text-white">รอบอก (นิ้ว)</div>
                         <input
                           inputMode="decimal"
                           placeholder="40"
@@ -1617,7 +1739,7 @@ function FitnessApp() {
                         />
                       </label>
                       <label className="space-y-2">
-                        <div className="text-sm font-bold text-neutral-900 dark:text-white">Neck (in)</div>
+                        <div className="text-sm font-bold text-neutral-900 dark:text-white">รอบคอ (นิ้ว)</div>
                         <input
                           inputMode="decimal"
                           placeholder="15"
@@ -1654,8 +1776,8 @@ function FitnessApp() {
               {coachStep === 4 && (
                 <div className="space-y-6">
                   <div className="text-center">
-                    <h1 className="text-2xl font-bold text-neutral-900 dark:text-white">Your Goal</h1>
-                    <p className="mt-2 text-sm text-emerald-900/60 dark:text-emerald-100/60">We&apos;ll help you get there</p>
+                    <h1 className="text-2xl font-bold text-neutral-900 dark:text-white">เป้าหมายของคุณ</h1>
+                    <p className="mt-2 text-sm text-emerald-900/60 dark:text-emerald-100/60">เราจะช่วยวางแผนให้ไปถึงเป้าหมายอย่างยั่งยืน</p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -1682,10 +1804,10 @@ function FitnessApp() {
                   <div className="rounded-3xl border border-emerald-900/10 dark:border-white/10 bg-white/60 dark:bg-[#0a120f]/60 p-6 backdrop-blur-md transition-colors duration-500 ease-in-out">
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <label className="space-y-2">
-                        <div className="text-sm font-bold text-neutral-900 dark:text-white">Target Weight (kg)</div>
+                        <div className="text-sm font-bold text-neutral-900 dark:text-white">น้ำหนักเป้าหมาย (กก.)</div>
                         <input
                           inputMode="decimal"
-                          placeholder="Optional"
+                          placeholder="ไม่บังคับ"
                           value={draftProfile.targetWeightKg}
                           onChange={(e) => setDraftProfile((d) => ({ ...d, targetWeightKg: e.target.value }))}
                           onBlur={() => commitNumber('targetWeightKg', draftProfile.targetWeightKg, { min: 30, max: 300 })}
@@ -1693,7 +1815,7 @@ function FitnessApp() {
                         />
                       </label>
                       <label className="space-y-2">
-                        <div className="text-sm font-bold text-neutral-900 dark:text-white">Duration (Weeks)</div>
+                        <div className="text-sm font-bold text-neutral-900 dark:text-white">ระยะเวลา (สัปดาห์)</div>
                         <input
                           inputMode="numeric"
                           placeholder="8"
@@ -1704,7 +1826,7 @@ function FitnessApp() {
                         />
                       </label>
                       <label className="space-y-2">
-                        <div className="text-sm font-bold text-neutral-900 dark:text-white">Training Days/Week</div>
+                        <div className="text-sm font-bold text-neutral-900 dark:text-white">จำนวนวันซ้อมต่อสัปดาห์</div>
                         <input
                           inputMode="numeric"
                           placeholder="3"
@@ -1736,7 +1858,7 @@ function FitnessApp() {
                       }`}
                     >
                       {coachSubmitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}
-                      Create Plan
+                      สร้างแผนเริ่มต้น
                     </button>
                   </div>
                 </div>
@@ -1744,47 +1866,43 @@ function FitnessApp() {
 
               {/* Step 5: Dashboard & Chat */}
               {coachStep === 5 && (
-                <div className="space-y-6">
-                  <div className="flex items-center justify-between">
+                <div className="flex h-full min-h-0 flex-col gap-3">
+                  <div className="flex shrink-0 items-center justify-between px-1">
                     <div>
-                      <h1 className="text-2xl font-bold text-neutral-900 dark:text-white">Coach Dashboard</h1>
-                      <p className="text-sm text-emerald-900/60 dark:text-emerald-100/60">Your personalized plan</p>
+                      <h1 className="text-base font-extrabold text-neutral-900 dark:text-white">สรุปเป้าหมายของคุณ</h1>
+                      <p className="text-xs text-emerald-900/50 dark:text-emerald-100/50">ใช้ข้อมูลนี้ประกอบคำแนะนำของโค้ช</p>
                     </div>
                     <button
                       onClick={() => setCoachStep(1)}
-                      className="rounded-full bg-emerald-900/5 dark:bg-white/5 px-4 py-2 text-xs font-bold text-emerald-900/60 dark:text-emerald-100/60 transition hover:bg-emerald-900/10 dark:hover:bg-white/10 hover:text-neutral-900 dark:hover:text-white"
+                      className="rounded-full bg-emerald-900/5 px-3 py-2 text-[11px] font-bold text-emerald-900/60 transition hover:bg-emerald-900/10 hover:text-neutral-900 dark:bg-white/5 dark:text-emerald-100/60 dark:hover:bg-white/10 dark:hover:text-white"
                     >
-                      Edit Profile
+                      แก้ไขข้อมูล
                     </button>
                   </div>
 
                   {/* Stats Grid */}
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <div className="rounded-3xl bg-white/60 dark:bg-[#0a120f]/60 border border-emerald-900/5 dark:border-white/5 p-4 backdrop-blur-md transition-colors duration-500 ease-in-out">
+                  <div className="grid shrink-0 grid-cols-4 gap-2">
+                    <div className="rounded-2xl border border-emerald-900/5 bg-white/60 p-2.5 backdrop-blur-md dark:border-white/5 dark:bg-[#0a120f]/60">
                       <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-900/40 dark:text-emerald-100/40">BMI</div>
-                      <div className="mt-1 text-2xl font-extrabold text-neutral-900 dark:text-white">{coachDerived.bmi.toFixed(1)}</div>
-                      <div className="text-xs font-medium text-emerald-600 dark:text-emerald-400">{coachDerived.bmiCategory}</div>
+                      <div className="mt-0.5 text-lg font-extrabold text-neutral-900 dark:text-white">{coachDerived.bmi.toFixed(1)}</div>
                     </div>
-                    <div className="rounded-3xl bg-white/60 dark:bg-[#0a120f]/60 border border-emerald-900/5 dark:border-white/5 p-4 backdrop-blur-md transition-colors duration-500 ease-in-out">
+                    <div className="rounded-2xl border border-emerald-900/5 bg-white/60 p-2.5 backdrop-blur-md dark:border-white/5 dark:bg-[#0a120f]/60">
                       <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-900/40 dark:text-emerald-100/40">TDEE</div>
-                      <div className="mt-1 text-2xl font-extrabold text-neutral-900 dark:text-white">{round(coachDerived.tdee)}</div>
-                      <div className="text-xs text-emerald-900/40 dark:text-emerald-100/40">kcal/day</div>
+                      <div className="mt-0.5 text-lg font-extrabold text-neutral-900 dark:text-white">{round(coachDerived.tdee)}</div>
                     </div>
-                    <div className="rounded-3xl bg-emerald-500 p-4 text-white shadow-[0_0_15px_rgba(16,185,129,0.3)]">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-100">Target</div>
-                      <div className="mt-1 text-2xl font-extrabold">{round(coachDerived.target)}</div>
-                      <div className="text-xs text-emerald-100">kcal/day</div>
+                    <div className="rounded-2xl border border-[#d9a943]/25 bg-[#f2cd72]/55 p-2.5 text-[#765817] shadow-[0_8px_18px_rgba(180,137,45,0.12)] dark:text-[#fff0bd]">
+                      <div className="text-[10px] font-bold uppercase tracking-wider">เป้าหมาย</div>
+                      <div className="mt-0.5 text-lg font-extrabold">{round(coachDerived.target)}</div>
                     </div>
-                    <div className="rounded-3xl bg-white/60 dark:bg-[#0a120f]/60 border border-emerald-900/5 dark:border-white/5 p-4 backdrop-blur-md transition-colors duration-500 ease-in-out">
+                    <div className="rounded-2xl border border-emerald-900/5 bg-white/60 p-2.5 backdrop-blur-md dark:border-white/5 dark:bg-[#0a120f]/60">
                       <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-900/40 dark:text-emerald-100/40">Protein</div>
-                      <div className="mt-1 text-xl font-extrabold text-neutral-900 dark:text-white">{coachDerived.proteinRange[0]}-{coachDerived.proteinRange[1]}</div>
-                      <div className="text-xs text-emerald-900/40 dark:text-emerald-100/40">g/day</div>
+                      <div className="mt-0.5 truncate text-base font-extrabold text-neutral-900 dark:text-white">{coachDerived.proteinRange[0]}-{coachDerived.proteinRange[1]}g</div>
                     </div>
                   </div>
 
                   {/* Chat Interface */}
-                  <div className="flex h-[65vh] sm:h-150 flex-col overflow-hidden rounded-4xl border border-emerald-900/10 dark:border-white/10 bg-white/60 dark:bg-[#0a120f]/60 shadow-2xl backdrop-blur-md transition-colors duration-500 ease-in-out">
-                    <div className="border-b border-emerald-900/5 dark:border-white/5 bg-emerald-50/50 dark:bg-emerald-950/30 px-6 py-4">
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-emerald-900/10 bg-white/60 shadow-lg backdrop-blur-md dark:border-white/10 dark:bg-[#0a120f]/60">
+                    <div className="shrink-0 border-b border-emerald-900/5 bg-emerald-50/50 px-4 py-3 dark:border-white/5 dark:bg-emerald-950/30">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="grid h-10 w-10 place-items-center rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.2)]">
@@ -1792,7 +1910,7 @@ function FitnessApp() {
                           </div>
                           <div>
                             <div className="text-sm font-bold text-neutral-900 dark:text-white">AI Coach</div>
-                            <div className="text-xs text-emerald-900/40 dark:text-emerald-100/40">Online 24/7</div>
+                            <div className="text-xs text-emerald-900/40 dark:text-emerald-100/40">พร้อมช่วยคุณเสมอ</div>
                           </div>
                         </div>
                         <button
@@ -1804,7 +1922,7 @@ function FitnessApp() {
                       </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-emerald-50/30 dark:bg-black/20">
+                    <div className="coach-message-scroll min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain bg-emerald-50/30 p-4 dark:bg-black/20">
                       {coachMessages.map((m) => (
                         <div
                           key={m.id}
@@ -1813,7 +1931,7 @@ function FitnessApp() {
                           <div
                             className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
                               m.role === 'user'
-                                ? 'bg-emerald-600 text-white shadow-[0_0_10px_rgba(5,150,105,0.3)]'
+                                ? 'bg-[#d98c68] text-white shadow-[0_8px_18px_rgba(177,105,75,0.2)]'
                                 : 'bg-white dark:bg-[#1a2e26] text-neutral-900 dark:text-emerald-50 border border-emerald-900/5 dark:border-white/5'
                             }`}
                           >
@@ -1833,10 +1951,10 @@ function FitnessApp() {
                           </div>
                         </div>
                       )}
-                      <div ref={coachMessagesEndRef} />
+                      <div ref={coachMessagesEndRef} aria-live="polite" />
                     </div>
 
-                    <div className="border-t border-emerald-900/5 dark:border-white/5 bg-emerald-50/50 dark:bg-emerald-950/30 p-4">
+                    <div className="shrink-0 border-t border-emerald-900/5 bg-emerald-50/95 p-3 shadow-[0_-8px_24px_rgba(0,0,0,0.04)] backdrop-blur-xl dark:border-white/5 dark:bg-emerald-950/90">
                       {coachApiError && (
                         <div className="mb-2 text-xs font-medium text-rose-500 dark:text-rose-400 text-center">
                           {coachApiError}
@@ -1857,9 +1975,10 @@ function FitnessApp() {
                       )}
                       <div className="flex gap-2">
                         <input
+                          ref={coachInputRef}
                           value={coachDraft}
                           onChange={(e) => setCoachDraft(e.target.value)}
-                          placeholder="Ask your coach..."
+                          placeholder="ถามโค้ชได้เลย..."
                           className="flex-1 rounded-full border border-emerald-900/10 dark:border-white/10 bg-white dark:bg-black/40 px-4 py-3 text-sm font-medium text-neutral-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 placeholder:text-emerald-900/30 dark:placeholder:text-emerald-100/20"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' && !e.shiftKey) {
@@ -1880,6 +1999,8 @@ function FitnessApp() {
                   </div>
                 </div>
               )}
+                </div>
+              </motion.aside>
             </motion.div>
           )}
         </AnimatePresence>
@@ -1891,19 +2012,19 @@ function FitnessApp() {
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="overflow-hidden rounded-4xl bg-white/80 dark:bg-[#0a120f]/80 border border-emerald-900/5 dark:border-white/5 p-6 shadow-2xl sticky top-8 backdrop-blur-md transition-colors duration-500 ease-in-out"
+            className="cozy-surface overflow-hidden rounded-[2rem] p-6 sticky top-8 transition-colors duration-500 ease-in-out"
           >
-            <div className="absolute inset-0 bg-linear-to-br from-emerald-500/10 to-transparent" />
+            <div className="absolute inset-0 bg-linear-to-br from-[#f2cd72]/14 via-transparent to-[#f4b89c]/12" />
             
             <div className="relative z-10 flex flex-col items-center text-center">
-              <div className="mb-2 text-xs font-bold uppercase tracking-widest text-emerald-600 dark:text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">Daily Goal</div>
+              <div className="mb-2 text-xs font-bold uppercase tracking-widest text-[#a96550] dark:text-[#f2b095]">เป้าหมายโปรตีนวันนี้</div>
               <div className="relative w-40 h-40 mb-4 flex items-center justify-center">
                  {/* Progress Ring */}
                  <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                    <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="6" className="text-emerald-100 dark:text-emerald-950" />
+                    <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="6" className="text-[#f1e4cf] dark:text-[#5a4c40]" />
                     <motion.circle 
                       cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="6" 
-                      className="text-emerald-500 dark:text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.6)]"
+                      className="text-[#d98c68] drop-shadow-[0_8px_14px_rgba(177,105,75,0.2)] dark:text-[#efa789]"
                       strokeLinecap="round"
                       initial={{ pathLength: 0 }}
                       animate={{ pathLength: progress / 100 }}
@@ -1912,22 +2033,22 @@ function FitnessApp() {
                  </svg>
                  <div className="absolute inset-0 flex flex-col items-center justify-center">
                     <span className="text-4xl font-black tracking-tighter text-neutral-900 dark:text-white drop-shadow-lg">{Math.round(proteinAnimated)}</span>
-                    <span className="text-xs font-medium text-emerald-900/40 dark:text-emerald-100/40">/ 180g Protein</span>
+                    <span className="text-xs font-medium text-emerald-900/40 dark:text-emerald-100/40">จากเป้า {proteinGoal} กรัม</span>
                  </div>
               </div>
               
-              <div className="grid grid-cols-3 gap-4 w-full border-t border-emerald-900/5 dark:border-white/5 pt-4">
-                 <div>
-                    <div className="text-[10px] text-emerald-900/40 dark:text-emerald-100/40 uppercase tracking-wider">Kcal</div>
-                    <div className="text-lg font-bold text-neutral-900 dark:text-white">{Math.round(kcalAnimated)}</div>
+              <div className="grid grid-cols-3 gap-2 w-full border-t border-emerald-900/5 dark:border-white/5 pt-4">
+                 <div className="rounded-2xl border border-[#d98c68]/20 bg-[#d98c68]/13 p-2">
+                    <div className="text-[10px] text-[#a96550] uppercase tracking-wider">พลังงาน</div>
+                    <div className="text-lg font-bold text-[#a96550] dark:text-[#f2b095]">{Math.round(kcalAnimated)}</div>
                  </div>
-                 <div>
-                    <div className="text-[10px] text-emerald-900/40 dark:text-emerald-100/40 uppercase tracking-wider">Carbs</div>
-                    <div className="text-lg font-bold text-neutral-900 dark:text-white">{Math.round(cAnimated)}</div>
+                 <div className="rounded-2xl border border-[#e3b950]/25 bg-[#f2cd72]/20 p-2">
+                    <div className="text-[10px] text-[#8b6b20] uppercase tracking-wider">คาร์บ</div>
+                    <div className="text-lg font-bold text-[#8b6b20] dark:text-[#f5dfa0]">{Math.round(cAnimated)}g</div>
                  </div>
-                 <div>
-                    <div className="text-[10px] text-emerald-900/40 dark:text-emerald-100/40 uppercase tracking-wider">Fat</div>
-                    <div className="text-lg font-bold text-neutral-900 dark:text-white">{Math.round(fAnimated)}</div>
+                 <div className="rounded-2xl border border-[#e99b80]/25 bg-[#f4b89c]/20 p-2">
+                    <div className="text-[10px] text-[#9d5d49] uppercase tracking-wider">ไขมัน</div>
+                    <div className="text-lg font-bold text-[#9d5d49] dark:text-[#f8cfbc]">{Math.round(fAnimated)}g</div>
                  </div>
               </div>
             </div>
@@ -1938,12 +2059,11 @@ function FitnessApp() {
 
       {/* Floating Bottom Navigation (Mobile Only) */}
       <div className="md:hidden fixed bottom-6 inset-x-0 z-40 flex justify-center">
-        <div className="flex items-center gap-1 p-1.5 rounded-full bg-white/90 dark:bg-[#0a120f]/90 border border-emerald-900/10 dark:border-white/10 backdrop-blur-xl shadow-2xl shadow-emerald-900/20 dark:shadow-black/50 transition-colors duration-500 ease-in-out">
+        <div className="flex items-center gap-1 p-1.5 rounded-full bg-[#fffdf8]/92 dark:bg-[#443a32]/92 border border-[#8f765d]/12 dark:border-white/10 backdrop-blur-xl shadow-[0_14px_36px_rgba(105,82,57,0.16)] dark:shadow-black/30 transition-colors duration-500 ease-in-out">
           {[
-            { id: 'workout', icon: Dumbbell, label: 'Workout' },
-            { id: 'nutrition', icon: Utensils, label: 'Food' },
-            { id: 'protein', icon: Zap, label: 'Quick' },
-            { id: 'coach', icon: Bot, label: 'Coach' },
+            { id: 'workout', icon: Dumbbell, label: 'ออกกำลัง' },
+            { id: 'nutrition', icon: Utensils, label: 'อาหาร' },
+            { id: 'protein', icon: Zap, label: 'โปรตีน' },
           ].map((tab) => {
             const isActive = activeTab === tab.id;
             return (
@@ -1957,7 +2077,7 @@ function FitnessApp() {
                 {isActive && (
                   <motion.div
                     layoutId="activeTab"
-                    className="absolute inset-0 bg-emerald-500 rounded-full shadow-[0_0_10px_#10b981]"
+                    className="absolute inset-0 rounded-full bg-[#d98c68] shadow-[0_8px_18px_rgba(177,105,75,0.24)]"
                     transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                   />
                 )}
@@ -1977,6 +2097,28 @@ function FitnessApp() {
         </div>
       </div>
 
+      <AnimatePresence>
+        {!coachOpen && (
+          <motion.button
+            type="button"
+            initial={{ opacity: 0, scale: 0.75, y: 16 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.75, y: 16 }}
+            whileHover={prefersReducedMotion ? undefined : { scale: 1.05 }}
+            whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
+            onClick={() => setCoachOpen(true)}
+            aria-label="เปิดแชท AI Coach"
+            className="group fixed bottom-24 right-5 z-50 flex items-center gap-3 rounded-full bg-[#d98c68] p-3 text-white shadow-[0_14px_35px_rgba(177,105,75,0.3)] ring-4 ring-[#fff8ed]/85 transition-colors hover:bg-[#bd7454] dark:ring-[#342d27]/80 md:bottom-7 md:right-7"
+          >
+            <span className="hidden pl-2 text-sm font-extrabold md:block">ถาม AI Coach</span>
+            <span className="relative grid h-10 w-10 place-items-center rounded-full bg-white/18">
+              <MochiMascot mood="coach" size="sm" />
+              <span className="absolute -right-0.5 -top-0.5 h-3.5 w-3.5 rounded-full border-2 border-[#d98c68] bg-[#f2cd72]" />
+            </span>
+          </motion.button>
+        )}
+      </AnimatePresence>
+
       {/* AI Nutrition Modal (Reused Logic) */}
       <AnimatePresence>
         {aiOpen && (
@@ -1984,7 +2126,7 @@ function FitnessApp() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 backdrop-blur-sm sm:items-center sm:p-4"
             onClick={() => setAiOpen(false)}
           >
             <motion.div
@@ -1993,23 +2135,34 @@ function FitnessApp() {
               exit={{ y: '100%' }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
               onClick={e => e.stopPropagation()}
-              className="w-full max-w-md bg-white dark:bg-[#0a120f] border border-emerald-900/10 dark:border-white/10 rounded-3xl overflow-hidden shadow-2xl transition-colors duration-500 ease-in-out"
+              role="dialog"
+              aria-modal="true"
+              aria-label="วิเคราะห์สารอาหาร"
+              className="flex h-[calc(100dvh-1rem)] w-full max-w-xl flex-col overflow-hidden rounded-t-[2rem] border border-[#8f765d]/12 bg-[#fffdf8] shadow-[0_28px_70px_rgba(57,43,31,0.24)] transition-colors duration-500 ease-in-out dark:border-white/10 dark:bg-[#443a32] sm:h-[min(860px,calc(100dvh-2rem))] sm:rounded-[2rem]"
             >
-               <div className="p-4 border-b border-emerald-900/10 dark:border-white/10 flex justify-between items-center bg-emerald-50 dark:bg-emerald-950/30 transition-colors duration-500 ease-in-out">
-                  <div className="flex items-center gap-2">
-                     <Sparkles className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                     <span className="font-bold text-emerald-900 dark:text-white transition-colors duration-500 ease-in-out">AI Nutrition</span>
+               <div className="flex shrink-0 items-center justify-between border-b border-emerald-900/10 bg-emerald-50 p-4 transition-colors duration-500 ease-in-out dark:border-white/10 dark:bg-emerald-950/30">
+                  <div className="flex items-center gap-3">
+                     <MochiMascot mood="food" size="sm" />
+                     <div>
+                       <span className="block font-black text-[#55483d] dark:text-[#fff4df]">AI Nutrition</span>
+                       <span className="block text-[10px] font-bold text-[#a17c62] dark:text-[#d7c5aa]">เล่ามื้ออาหารแบบที่คุณพูดจริง ๆ ได้เลย</span>
+                     </div>
                   </div>
-                  <button onClick={() => setAiOpen(false)} className="p-1 rounded-full hover:bg-emerald-900/5 dark:hover:bg-white/10 transition-colors duration-500 ease-in-out">
-                     <div className="w-6 h-1 bg-emerald-900/20 dark:bg-emerald-100/20 rounded-full transition-colors duration-500 ease-in-out" />
+                  <button
+                    type="button"
+                    onClick={() => setAiOpen(false)}
+                    aria-label="ปิดหน้าต่างวิเคราะห์สารอาหาร"
+                    className="grid h-9 w-9 place-items-center rounded-full text-emerald-900/50 transition-colors hover:bg-emerald-900/5 hover:text-emerald-900 dark:text-emerald-100/50 dark:hover:bg-white/10 dark:hover:text-white"
+                  >
+                     <X className="h-5 w-5" />
                   </button>
                </div>
                
-               <div className="p-6 space-y-4">
+               <div className="nutrition-modal-scroll min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-5 sm:p-6">
                   <textarea
                     value={aiText}
                     onChange={(e) => setAiText(e.target.value)}
-                    placeholder="Describe your meal..."
+                    placeholder="เช่น กะเพราไก่ + ไข่ดาว 1 ฟอง"
                     className="w-full h-32 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-900/10 dark:border-white/10 rounded-xl p-4 text-emerald-900 dark:text-white placeholder:text-emerald-900/40 dark:placeholder:text-emerald-100/20 focus:outline-none focus:border-emerald-500/50 transition-colors duration-500 ease-in-out resize-none"
                   />
                   
@@ -2020,7 +2173,7 @@ function FitnessApp() {
                         className="flex-1 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:hover:bg-emerald-500 text-white font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2 shadow-[0_0_10px_rgba(16,185,129,0.4)]"
                      >
                         {aiLoading ? <RotateCw className="animate-spin w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
-                        Analyze
+                        วิเคราะห์สารอาหาร
                      </button>
                   </div>
 
@@ -2051,15 +2204,15 @@ function FitnessApp() {
                               {/* Macros Grid */}
                               <div className="grid grid-cols-3 gap-2 mb-4">
                                  <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-xl p-2 text-center border border-emerald-900/5 dark:border-white/5 transition-colors duration-500 ease-in-out">
-                                    <div className="text-[10px] text-emerald-900/40 dark:text-emerald-100/40 uppercase font-bold transition-colors duration-500 ease-in-out">Protein</div>
+                                    <div className="text-[10px] text-emerald-900/40 dark:text-emerald-100/40 uppercase font-bold transition-colors duration-500 ease-in-out">โปรตีน</div>
                                     <div className="text-lg font-bold text-emerald-900 dark:text-white transition-colors duration-500 ease-in-out">{r.proteinG}g</div>
                                  </div>
                                  <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-xl p-2 text-center border border-emerald-900/5 dark:border-white/5 transition-colors duration-500 ease-in-out">
-                                    <div className="text-[10px] text-emerald-900/40 dark:text-emerald-100/40 uppercase font-bold transition-colors duration-500 ease-in-out">Carbs</div>
+                                    <div className="text-[10px] text-emerald-900/40 dark:text-emerald-100/40 uppercase font-bold transition-colors duration-500 ease-in-out">คาร์บ</div>
                                     <div className="text-lg font-bold text-emerald-900 dark:text-white transition-colors duration-500 ease-in-out">{r.carbsG}g</div>
                                  </div>
                                  <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-xl p-2 text-center border border-emerald-900/5 dark:border-white/5 transition-colors duration-500 ease-in-out">
-                                    <div className="text-[10px] text-emerald-900/40 dark:text-emerald-100/40 uppercase font-bold transition-colors duration-500 ease-in-out">Fat</div>
+                                    <div className="text-[10px] text-emerald-900/40 dark:text-emerald-100/40 uppercase font-bold transition-colors duration-500 ease-in-out">ไขมัน</div>
                                     <div className="text-lg font-bold text-emerald-900 dark:text-white transition-colors duration-500 ease-in-out">{r.fatG}g</div>
                                  </div>
                               </div>
@@ -2104,16 +2257,20 @@ function FitnessApp() {
                            </div>
                         ))}
                         
-                        <button 
-                           onClick={saveAiAsMeal}
-                           className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3.5 rounded-2xl transition-all shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:shadow-[0_0_25px_rgba(16,185,129,0.5)] active:scale-[0.98] flex items-center justify-center gap-2"
-                        >
-                           <Plus className="w-5 h-5" />
-                           Save to Daily Log
-                        </button>
                      </div>
                   )}
                </div>
+               {aiResponse?.results && aiResponse.results.length > 0 && (
+                 <div className="shrink-0 border-t border-emerald-900/10 bg-white/95 p-4 shadow-[0_-10px_30px_rgba(0,0,0,0.08)] backdrop-blur-xl dark:border-white/10 dark:bg-[#0a120f]/95">
+                   <button
+                     onClick={saveAiAsMeal}
+                     className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 py-3.5 font-bold text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all hover:bg-emerald-600 hover:shadow-[0_0_25px_rgba(16,185,129,0.5)] active:scale-[0.98]"
+                   >
+                     <Plus className="h-5 w-5" />
+                     บันทึกเป็นมื้อวันนี้
+                   </button>
+                 </div>
+               )}
             </motion.div>
           </motion.div>
         )}
@@ -2134,9 +2291,9 @@ function FitnessApp() {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-md bg-[#0a120f] border border-white/10 rounded-3xl overflow-hidden shadow-2xl max-h-[80vh] flex flex-col"
+              className="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-3xl border border-[#8f765d]/12 bg-[#fffdf8] text-[#55483d] shadow-2xl dark:border-white/10 dark:bg-[#443a32] dark:text-[#fff4df]"
             >
-              <div className="p-5 border-b border-white/10 flex justify-between items-start bg-emerald-950/30">
+              <div className="flex items-start justify-between border-b border-[#8f765d]/10 bg-[#f1e4cf]/55 p-5 dark:border-white/10 dark:bg-[#55483d]/55">
                 <div>
                   <h3 className="text-xl font-bold text-white">{selectedExerciseDetail?.thaiName ?? selectedExerciseLabel}</h3>
                   <p className="text-sm text-emerald-100/60">{selectedExerciseDetail?.primary?.join(', ') ?? 'Exercise Details'}</p>
@@ -2149,7 +2306,7 @@ function FitnessApp() {
               <div className="p-5 overflow-y-auto space-y-6">
                  {/* Focus */}
                  <div className="space-y-2">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">Focus</h4>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400">จุดที่ควรโฟกัส</h4>
                     <div className="flex flex-wrap gap-2">
                        {(selectedExerciseDetail?.focus ?? []).map((f, i) => (
                           <span key={i} className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-bold border border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.1)]">
@@ -2161,7 +2318,7 @@ function FitnessApp() {
 
                  {/* Steps */}
                  <div className="space-y-2">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-100/40">How to</h4>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-100/40">วิธีทำ</h4>
                     <ol className="list-decimal list-inside space-y-1 text-sm text-emerald-100/80">
                        {(selectedExerciseDetail?.steps ?? []).map((s, i) => (
                           <li key={i} className="leading-relaxed">{s}</li>
@@ -2197,9 +2354,9 @@ function FitnessApp() {
       {/* Dialogs */}
       <ConfirmDialog
         open={confirmResetOpen}
-        title="Reset Day"
-        description="Start fresh? This clears all progress."
-        confirmLabel="Reset"
+        title="เริ่มข้อมูลวันนี้ใหม่?"
+        description="ความคืบหน้าการออกกำลังกาย โปรตีน และมื้ออาหารวันนี้จะถูกล้าง"
+        confirmLabel="เริ่มใหม่"
         variant="danger"
         prefersReducedMotion={prefersReducedMotion}
         onClose={() => setConfirmResetOpen(false)}
@@ -2211,9 +2368,9 @@ function FitnessApp() {
 
       <ConfirmDialog
         open={!!mealToDelete}
-        title="Delete Meal?"
-        description="This cannot be undone."
-        confirmLabel="Delete"
+        title="ลบมื้อนี้?"
+        description="เมื่อลบแล้วจะไม่สามารถย้อนกลับได้"
+        confirmLabel="ลบ"
         variant="danger"
         prefersReducedMotion={prefersReducedMotion}
         onClose={() => setMealToDelete(null)}
@@ -2222,6 +2379,51 @@ function FitnessApp() {
           setMealToDelete(null);
         }}
       />
+
+      <AnimatePresence>
+        {celebration && (
+          <motion.div
+            key={celebration.id}
+            initial={{ opacity: 0, y: 28, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.94 }}
+            transition={prefersReducedMotion ? { duration: 0 } : { type: 'spring', stiffness: 360, damping: 24 }}
+            className="pointer-events-none fixed bottom-28 left-1/2 z-70 w-[min(92vw,390px)] -translate-x-1/2 overflow-hidden rounded-[2rem] border border-[#8f765d]/12 bg-[#fffdf8]/96 p-4 shadow-[0_24px_60px_rgba(105,82,57,0.24)] backdrop-blur-xl dark:border-white/10 dark:bg-[#443a32]/96 md:bottom-8"
+            role="status"
+            aria-live="polite"
+          >
+            {!prefersReducedMotion && (
+              <div className="absolute inset-0 overflow-hidden">
+                {['#91ad8b', '#f2cd72', '#f4b89c', '#d98c68', '#b8cbae'].map((color, index) => (
+                  <motion.span
+                    key={color}
+                    initial={{ opacity: 0, y: 32, x: 0, rotate: 0 }}
+                    animate={{
+                      opacity: [0, 1, 0],
+                      y: [30, -42 - index * 6],
+                      x: (index - 2) * 42,
+                      rotate: index % 2 ? 160 : -160,
+                    }}
+                    transition={{ duration: 1.5, delay: index * 0.08, ease: 'easeOut' }}
+                    className="absolute bottom-2 left-1/2 h-3 w-3 rounded-[4px]"
+                    style={{ backgroundColor: color }}
+                  />
+                ))}
+              </div>
+            )}
+            <div className="relative flex items-center gap-4">
+              <MochiMascot mood={celebration.mood} size="lg" />
+              <div>
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-[#d98c68]" />
+                  <h3 className="font-black text-[#55483d] dark:text-[#fff4df]">{celebration.title}</h3>
+                </div>
+                <p className="mt-1 text-sm text-[#7d6b5d] dark:text-[#d7c5aa]">{celebration.message}</p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       
       {/* Save Success Toast */}
       <AnimatePresence>
@@ -2233,7 +2435,7 @@ function FitnessApp() {
                className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-white px-6 py-3 rounded-full shadow-lg font-bold flex items-center gap-2"
             >
                <CheckCircle2 className="w-5 h-5" />
-               Saved successfully
+               บันทึกเรียบร้อยแล้ว
             </motion.div>
          )}
       </AnimatePresence>
@@ -2248,7 +2450,7 @@ function FitnessApp() {
                className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-white px-6 py-3 rounded-full shadow-lg font-bold flex items-center gap-2"
             >
                <CheckCircle2 className="w-5 h-5" />
-               Coach updated
+               โค้ชอัปเดตคำแนะนำแล้ว
             </motion.div>
          )}
       </AnimatePresence>
