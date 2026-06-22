@@ -32,6 +32,10 @@ import {
   type ProgressEntry,
 } from '@/lib/progress';
 import { loadProgressEntries, saveDailyCheckin } from '@/lib/progressPersistence';
+import {
+  formatWeeklyRange,
+  type WeeklyReviewRecord,
+} from '@/lib/weeklyReview';
 
 type RangeDays = 7 | 30 | 90;
 
@@ -158,6 +162,9 @@ export function ProgressSection(props: ProgressSectionProps) {
   const [insight, setInsight] = useState<ProgressInsight | null>(null);
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState<string | null>(null);
+  const [weeklyReview, setWeeklyReview] = useState<WeeklyReviewRecord | null>(null);
+  const [weeklyLoading, setWeeklyLoading] = useState(false);
+  const [weeklyError, setWeeklyError] = useState<string | null>(null);
   const [draft, setDraft] = useState<CheckinDraft>(() => emptyCheckinDraft(today));
 
   const refresh = useCallback(async () => {
@@ -179,6 +186,46 @@ export function ProgressSection(props: ProgressSectionProps) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const loadWeeklyReview = useCallback(async () => {
+    if (!user || weeklyLoading) return;
+    setWeeklyLoading(true);
+    setWeeklyError(null);
+    try {
+      const response = await fetch('/api/progress/weekly-review', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          targetCaloriesKcal: props.targetKcal,
+          targetProteinG: props.proteinGoal,
+        }),
+      });
+      const data = await response.json() as {
+        ok: boolean;
+        record?: WeeklyReviewRecord;
+        error?: string;
+      };
+      if (!response.ok || !data.ok || !data.record) {
+        throw new Error(data.error || 'สร้างรายงานรายสัปดาห์ไม่สำเร็จ');
+      }
+      setWeeklyReview(data.record);
+    } catch (reviewError) {
+      setWeeklyError(reviewError instanceof Error ? reviewError.message : 'สร้างรายงานรายสัปดาห์ไม่สำเร็จ');
+    } finally {
+      setWeeklyLoading(false);
+    }
+  }, [user, weeklyLoading, props.targetKcal, props.proteinGoal]);
+
+  useEffect(() => {
+    if (!user) {
+      setWeeklyReview(null);
+      return;
+    }
+    void loadWeeklyReview();
+    // Generate once when the signed-in user opens Progress. The endpoint itself
+    // returns a cached review when the weekly source snapshot has not changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   useEffect(() => {
     if (!open) return;
@@ -348,6 +395,144 @@ export function ProgressSection(props: ProgressSectionProps) {
           <div className="text-[10px] font-bold text-[#a18c79]">บันทึกต่อเนื่อง (วัน)</div>
         </div>
       </div>
+
+      <section className="cozy-surface relative overflow-hidden rounded-[2rem] p-5">
+        <div className="absolute -right-10 -top-14 h-40 w-40 rounded-full bg-[#f2cd72]/22 blur-3xl" />
+        <div className="absolute -bottom-16 left-20 h-36 w-36 rounded-full bg-[#91ad8b]/14 blur-3xl" />
+        <div className="relative flex items-start justify-between gap-4">
+          <div className="flex gap-3">
+            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-[#f2cd72]/22 text-[#9a7424]">
+              <CalendarDays className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="font-black text-[#55483d] dark:text-[#fff4df]">Weekly AI Review</h3>
+                {weeklyReview?.cached && (
+                  <span className="rounded-full bg-[#91ad8b]/14 px-2 py-0.5 text-[9px] font-extrabold text-[#687b63] dark:text-[#c7dfc0]">
+                    รายงานที่บันทึกไว้
+                  </span>
+                )}
+              </div>
+              <p className="mt-0.5 text-[11px] text-[#a18c79]">
+                {weeklyReview
+                  ? formatWeeklyRange(weeklyReview.weekStart, weeklyReview.weekEnd)
+                  : 'สรุปสัปดาห์ที่จบแล้วจากข้อมูลจริงของคุณ'}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={weeklyLoading}
+            onClick={loadWeeklyReview}
+            className="flex shrink-0 items-center gap-2 rounded-2xl border border-[#d98c68]/22 bg-[#d98c68]/10 px-3 py-2.5 text-xs font-extrabold text-[#a96550] transition hover:bg-[#d98c68]/16 disabled:opacity-50 dark:text-[#f2b095]"
+          >
+            {weeklyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            ตรวจข้อมูลใหม่
+          </button>
+        </div>
+
+        {weeklyLoading && !weeklyReview && (
+          <div className="relative mt-6 grid min-h-44 place-items-center rounded-3xl bg-white/35 dark:bg-black/10">
+            <div className="text-center">
+              <Loader2 className="mx-auto h-7 w-7 animate-spin text-[#d98c68]" />
+              <p className="mt-3 text-sm font-bold text-[#725f50] dark:text-[#ddcbb1]">กำลังสรุปสัปดาห์ที่ผ่านมา…</p>
+              <p className="text-[11px] text-[#a18c79]">ครั้งต่อไปจะเปิดจากรายงานที่บันทึกไว้ทันที</p>
+            </div>
+          </div>
+        )}
+
+        {weeklyReview && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="relative mt-5 space-y-5 border-t border-[#8f765d]/10 pt-5"
+          >
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <h4 className="text-xl font-black text-[#a96550] dark:text-[#f2b095]">{weeklyReview.review.headline}</h4>
+                <p className="mt-1 text-sm leading-relaxed text-[#6f5b4b] dark:text-[#e4d4bd]">{weeklyReview.review.summary}</p>
+              </div>
+              <div className="shrink-0 rounded-2xl bg-[#fffdf8]/70 p-3 text-center dark:bg-white/5">
+                <div className="text-2xl font-black text-[#b66f50] dark:text-[#f2b095]">
+                  {Math.round(weeklyReview.review.dataQuality.score)}%
+                </div>
+                <div className="text-[9px] font-extrabold text-[#a18c79]">ความครบของข้อมูล</div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-[#f1e4cf]/40 p-3 text-xs leading-relaxed text-[#7a6757] dark:bg-white/5 dark:text-[#d7c5aa]">
+              {weeklyReview.review.dataQuality.message}
+              {weeklyReview.review.dataQuality.missing.length > 0 && (
+                <span className="mt-1 block text-[10px] text-[#a18c79]">
+                  ข้อมูลที่ช่วยให้แม่นขึ้น: {weeklyReview.review.dataQuality.missing.join(' • ')}
+                </span>
+              )}
+            </div>
+
+            {weeklyReview.review.wins.length > 0 && (
+              <div>
+                <h5 className="text-xs font-black text-[#687b63] dark:text-[#c7dfc0]">สิ่งที่ทำได้ดีในสัปดาห์นี้</h5>
+                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                  {weeklyReview.review.wins.map((win) => (
+                    <div key={win} className="rounded-2xl bg-[#91ad8b]/12 p-3 text-xs font-semibold leading-relaxed text-[#66775f] dark:text-[#c7dfc0]">
+                      ✓ {win}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div>
+              <h5 className="text-xs font-black text-[#725f50] dark:text-[#ddcbb1]">แนวโน้มสำคัญ</h5>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                {[
+                  ['น้ำหนัก', weeklyReview.review.trends.weight],
+                  ['รอบเอว', weeklyReview.review.trends.waist],
+                  ['โภชนาการ', weeklyReview.review.trends.nutrition],
+                  ['การนอนกับความหิว', weeklyReview.review.trends.sleepAndHunger],
+                  ['การออกกำลังกาย', weeklyReview.review.trends.training],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-2xl border border-[#8f765d]/9 bg-white/42 p-3 dark:bg-black/10">
+                    <div className="text-[10px] font-black text-[#a96550] dark:text-[#f2b095]">{label}</div>
+                    <p className="mt-1 text-xs leading-relaxed text-[#6f5b4b] dark:text-[#e4d4bd]">{value}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {weeklyReview.review.possiblePlateauReasons.length > 0 && (
+              <div className="rounded-2xl bg-[#f2cd72]/16 p-4 text-[#7e621f] dark:text-[#f5dfa0]">
+                <h5 className="text-xs font-black">หากน้ำหนักนิ่ง สิ่งที่อาจเกี่ยวข้อง</h5>
+                <ul className="mt-2 space-y-1.5 text-xs leading-relaxed">
+                  {weeklyReview.review.possiblePlateauReasons.map((reason) => <li key={reason}>• {reason}</li>)}
+                </ul>
+              </div>
+            )}
+
+            <div>
+              <h5 className="text-xs font-black text-[#a96550] dark:text-[#f2b095]">แผนเล็ก ๆ สำหรับสัปดาห์หน้า</h5>
+              <ol className="mt-2 space-y-2">
+                {weeklyReview.review.nextWeekPlan.map((step, index) => (
+                  <li key={step} className="flex gap-3 rounded-2xl bg-[#d98c68]/10 p-3 text-xs font-semibold leading-relaxed text-[#8f5b47] dark:text-[#f2b095]">
+                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#d98c68] text-[10px] font-black text-white">{index + 1}</span>
+                    {step}
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            <p className="text-[10px] leading-relaxed text-[#a18c79]">
+              {weeklyReview.review.caution} • สร้างเมื่อ {new Date(weeklyReview.generatedAt).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })}
+            </p>
+          </motion.div>
+        )}
+
+        {weeklyError && (
+          <div className="relative mt-4 rounded-2xl bg-red-500/10 p-3 text-xs font-semibold text-red-600 dark:text-red-300">
+            {weeklyError}
+          </div>
+        )}
+      </section>
 
       <section className="cozy-surface relative overflow-hidden rounded-[2rem] p-5">
         <div className="absolute -right-10 -top-12 h-36 w-36 rounded-full bg-[#f4b89c]/20 blur-3xl" />
