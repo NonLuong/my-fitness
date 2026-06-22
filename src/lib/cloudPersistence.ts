@@ -36,6 +36,26 @@ type CloudCoachMessageRow = {
   created_at: string;
 };
 
+export type CloudSyncIssue = {
+  area: 'profile' | 'daily_logs' | 'coach_messages';
+  message: string;
+};
+
+export type CloudMigrationResult = {
+  migrated: boolean;
+  issues: CloudSyncIssue[];
+};
+
+export function cloudErrorMessage(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const candidate = error as { message?: unknown; details?: unknown; hint?: unknown };
+    const parts = [candidate.message, candidate.details, candidate.hint]
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+    if (parts.length) return [...new Set(parts)].join(' · ');
+  }
+  return error instanceof Error ? error.message : 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ';
+}
+
 function migrationKey(userId: string) {
   return `fitsync_cloud_migrated_${userId}_v${MIGRATION_VERSION}`;
 }
@@ -49,34 +69,43 @@ function isPlainEmptyObject(value: unknown): boolean {
   );
 }
 
-export async function migrateLocalDataToCloud(user: User): Promise<boolean> {
-  if (typeof window === 'undefined') return false;
-  if (window.localStorage.getItem(migrationKey(user.id)) === 'done') return false;
+export async function migrateLocalDataToCloud(user: User): Promise<CloudMigrationResult> {
+  if (typeof window === 'undefined') return { migrated: false, issues: [] };
+  if (window.localStorage.getItem(migrationKey(user.id)) === 'done') {
+    return { migrated: false, issues: [] };
+  }
 
   const supabase = createSupabaseBrowserClient();
+  const issues: CloudSyncIssue[] = [];
+  let migrated = false;
 
   const storedProfile = safeParseJson<StoredCoachProfile<unknown, unknown>>(
     window.localStorage.getItem(COACH_PROFILE_STORAGE_KEY),
   );
 
   if (storedProfile?.profile) {
-    const { data: cloudProfile, error: profileReadError } = await supabase
-      .from('user_profiles')
-      .select('health_profile')
-      .eq('user_id', user.id)
-      .maybeSingle();
-    if (profileReadError) throw profileReadError;
+    try {
+      const { data: cloudProfile, error: profileReadError } = await supabase
+        .from('user_profiles')
+        .select('health_profile')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (profileReadError) throw profileReadError;
 
-    if (!cloudProfile || isPlainEmptyObject(cloudProfile.health_profile)) {
-      const { error } = await supabase.from('user_profiles').upsert({
-        user_id: user.id,
-        display_name: user.user_metadata?.full_name || user.user_metadata?.name || null,
-        health_profile: {
-          profile: storedProfile.profile,
-          draftProfile: storedProfile.draftProfile ?? null,
-        },
-      });
-      if (error) throw error;
+      if (!cloudProfile || isPlainEmptyObject(cloudProfile.health_profile)) {
+        const { error } = await supabase.from('user_profiles').upsert({
+          user_id: user.id,
+          display_name: user.user_metadata?.full_name || user.user_metadata?.name || null,
+          health_profile: {
+            profile: storedProfile.profile,
+            draftProfile: storedProfile.draftProfile ?? null,
+          },
+        });
+        if (error) throw error;
+        migrated = true;
+      }
+    } catch (error) {
+      issues.push({ area: 'profile', message: cloudErrorMessage(error) });
     }
   }
 
@@ -99,37 +128,49 @@ export async function migrateLocalDataToCloud(user: User): Promise<boolean> {
   }
 
   if (dailyRows.length) {
-    const { error } = await supabase
-      .from('daily_logs')
-      .upsert(dailyRows, { onConflict: 'user_id,log_date', ignoreDuplicates: true });
-    if (error) throw error;
+    try {
+      const { error } = await supabase
+        .from('daily_logs')
+        .upsert(dailyRows, { onConflict: 'user_id,log_date', ignoreDuplicates: true });
+      if (error) throw error;
+      migrated = true;
+    } catch (error) {
+      issues.push({ area: 'daily_logs', message: cloudErrorMessage(error) });
+    }
   }
 
   const storedChat = safeParseJson<StoredCoachChat<CloudCoachMessage>>(
     window.localStorage.getItem(COACH_CHAT_STORAGE_KEY),
   );
   if (storedChat?.messages?.length) {
-    const { count, error: countError } = await supabase
-      .from('coach_messages')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', user.id);
-    if (countError) throw countError;
+    try {
+      const { count, error: countError } = await supabase
+        .from('coach_messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id);
+      if (countError) throw countError;
 
-    if (!count) {
-      const rows = storedChat.messages.slice(-MAX_COACH_MESSAGES).map((message) => ({
-        user_id: user.id,
-        client_id: message.id,
-        role: message.role,
-        content: message.text,
-        client_created_at: new Date(message.ts).toISOString(),
-      }));
-      const { error } = await supabase.from('coach_messages').insert(rows);
-      if (error) throw error;
+      if (!count) {
+        const rows = storedChat.messages.slice(-MAX_COACH_MESSAGES).map((message) => ({
+          user_id: user.id,
+          client_id: message.id,
+          role: message.role,
+          content: message.text,
+          client_created_at: new Date(message.ts).toISOString(),
+        }));
+        const { error } = await supabase.from('coach_messages').insert(rows);
+        if (error) throw error;
+        migrated = true;
+      }
+    } catch (error) {
+      issues.push({ area: 'coach_messages', message: cloudErrorMessage(error) });
     }
   }
 
-  window.localStorage.setItem(migrationKey(user.id), 'done');
-  return true;
+  if (issues.length === 0) {
+    window.localStorage.setItem(migrationKey(user.id), 'done');
+  }
+  return { migrated, issues };
 }
 
 export async function loadCloudDailyLog<T>(userId: string, logDate: string): Promise<T | null> {
