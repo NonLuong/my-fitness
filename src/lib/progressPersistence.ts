@@ -4,6 +4,7 @@ import type { User } from '@supabase/supabase-js';
 
 import { localDateKey } from './dailyLog';
 import {
+  inchesToCm,
   parseOptionalMetric,
   type BodyMeasurement,
   type CheckinDraft,
@@ -107,12 +108,12 @@ export async function saveDailyCheckin(user: User, draft: CheckinDraft): Promise
     user_id: user.id,
     measured_on: draft.date,
     weight_kg: parseOptionalMetric(draft.weightKg),
-    waist_cm: parseOptionalMetric(draft.waistCm),
-    chest_cm: parseOptionalMetric(draft.chestCm),
-    hip_cm: parseOptionalMetric(draft.hipCm),
-    arm_cm: parseOptionalMetric(draft.armCm),
-    thigh_cm: parseOptionalMetric(draft.thighCm),
-    neck_cm: parseOptionalMetric(draft.neckCm),
+    waist_cm: inchesToCm(parseOptionalMetric(draft.waistCm)),
+    chest_cm: inchesToCm(parseOptionalMetric(draft.chestCm)),
+    hip_cm: inchesToCm(parseOptionalMetric(draft.hipCm)),
+    arm_cm: inchesToCm(parseOptionalMetric(draft.armCm)),
+    thigh_cm: inchesToCm(parseOptionalMetric(draft.thighCm)),
+    neck_cm: inchesToCm(parseOptionalMetric(draft.neckCm)),
     body_fat_percent: parseOptionalMetric(draft.bodyFatPercent),
   };
 

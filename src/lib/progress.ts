@@ -73,6 +73,36 @@ export function parseOptionalMetric(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+export function inchesToCm(inches: number | null): number | null {
+  return inches === null ? null : Math.round(inches * 2.54 * 100) / 100;
+}
+
+export function cmToInches(cm: number | null): number | null {
+  return cm === null ? null : Math.round((cm / 2.54) * 10) / 10;
+}
+
+export type CircumferenceKind = 'waist' | 'chest' | 'hip' | 'arm' | 'thigh' | 'neck';
+
+const MIN_PLAUSIBLE_CM: Record<CircumferenceKind, number> = {
+  waist: 45,
+  chest: 50,
+  hip: 50,
+  arm: 20,
+  thigh: 30,
+  neck: 25,
+};
+
+export function storedCircumferenceToInches(
+  value: number | null,
+  kind: CircumferenceKind,
+): number | null {
+  if (value === null) return null;
+  // Early versions labelled these inputs as centimeters while some users
+  // naturally entered inches. Preserve those plausible inch values.
+  if (value < MIN_PLAUSIBLE_CM[kind]) return Math.round(value * 10) / 10;
+  return cmToInches(value);
+}
+
 export function weightChange(entries: ProgressEntry[]): number | null {
   const weights = entries
     .map((entry) => entry.measurement?.weightKg)
