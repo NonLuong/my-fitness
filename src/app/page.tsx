@@ -32,7 +32,6 @@ import {
   ChartLine,
 } from 'lucide-react';
 
-import { resolveExerciseDetailFromLabel } from '@/lib/exercises';
 import { localDateKey, safeParseJson, sumFiniteNonNegative } from '@/lib/dailyLog';
 import { normalizeCoachMarkdown } from '@/lib/coachMarkdown';
 import { mealTypeFromDate } from '@/lib/mealTime';
@@ -59,11 +58,6 @@ import { MochiMascot } from './_components/MochiMascot';
 import type { MealEntry } from './_components/types/nutrition';
 
 // --- 1. Type Definition ---
-interface DailySchedule {
-  title: string;
-  focus: string;
-  exercises: string[];
-}
 
 type ProteinCategory = 'supplement' | 'whole_food' | 'snack';
 
@@ -85,11 +79,8 @@ type WorkoutItemState = {
 
 type WorkoutState = Record<string, WorkoutItemState>;
 
-type ScheduleType = {
-  [key: number]: DailySchedule;
-};
-
 const MOBILE_TAB_STORAGE_KEY = 'ui_mobileTab_v2';
+type MainTab = 'nutrition' | 'protein' | 'progress';
 
 type AiNutritionResult = {
   itemName: string;
@@ -154,20 +145,6 @@ const ProgressSection = dynamic<ProgressSectionProps>(
     ssr: false,
   },
 );
-
-function parseWorkoutTarget(exerciseLabel: string) {
-  const m = /(\d+)x/i.exec(exerciseLabel);
-  if (!m) return 1;
-  const sets = Number(m[1]);
-  return Number.isFinite(sets) && sets > 0 ? sets : 1;
-}
-
-function makeWorkoutState(exercises: string[]): WorkoutState {
-  return exercises.reduce<WorkoutState>((acc, ex) => {
-    acc[ex] = { target: parseWorkoutTarget(ex), count: 0 };
-    return acc;
-  }, {});
-}
 
 // --- Coach Types & Helpers ---
 type Sex = 'male' | 'female';
@@ -460,17 +437,6 @@ type CelebrationState = {
   mood: 'workout' | 'food';
 };
 
-// --- 2. Schedule Data ---
-const SCHEDULE: ScheduleType = {
-  1: { title: "Upper Body Beast", focus: "Strength & Hypertrophy", exercises: ["Bench Press (4x8-10)", "Barbell Row (4x10-12)", "Overhead Press (3x10-12)", "Lat Pulldown (3x12-15)", "Dumbbell Lateral Raise (3x15)", "Cardio: Walk 30 min"] },
-  2: { title: "Leg Day Destruction", focus: "Legs Focus", exercises: ["Squat / Hack Squat (4x8-10)", "Leg Press (3x12-15)", "Leg Extension (3x15)", "Leg Curl (3x15)", "Calf Raise (4x20)", "Cardio: Bike 20 min"] },
-  3: { title: "Active Recovery", focus: "Rest & Heal", exercises: ["Rest & Relax", "Stretching / Yoga", "Light Walk (Optional)"] },
-  4: { title: "Push Limits", focus: "Chest & Shoulders", exercises: ["Incline Dumbbell Press (4x10-12)", "Machine Chest Press (3x12-15)", "Shoulder Press Machine (3x12)", "Tricep Pushdown (4x12-15)", "Cardio: Walk 30 min"] },
-  5: { title: "Pull & Legs Finale", focus: "Full Body Power", exercises: ["Deadlift / Rack Pull (3x8-10)", "Pull up / Lat Pulldown (3xMax)", "Cable Row (3x12)", "Bicep Curl (4x10-12)", "Leg Press (3x20)", "Cardio: Walk 30 min"] },
-  6: { title: "Fat Burn Zone", focus: "Cardio & Cheat Meal", exercises: ["Zone 2 Cardio (60 min)", "Enjoy Cheat Meal!"] },
-  0: { title: "Sunday Reset", focus: "Deep Recovery", exercises: ["Sleep 8+ Hours", "Meal Prep", "Relaxation"] }
-};
-
 const AmbientBackground = React.memo(function AmbientBackground() {
   return (
     <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
@@ -547,8 +513,6 @@ function FitnessApp() {
   // --- Logic ---
   const { user } = useAuth();
   const today = new Date();
-  const dayOfWeek = today.getDay();
-  const todaySchedule = SCHEDULE[dayOfWeek];
   const logDate = localDateKey(today);
   const storageKey = `log_${logDate}`;
 
@@ -620,7 +584,7 @@ function FitnessApp() {
       return {
         protein: 0,
         proteinEvents: [] as ProteinEvent[],
-        workout: makeWorkoutState(todaySchedule.exercises),
+        workout: {} as WorkoutState,
         meals: [] as MealEntry[]
       };
     }
@@ -629,7 +593,7 @@ function FitnessApp() {
       const workoutFromStorage = parsed.workout as WorkoutState | undefined;
       const workout = workoutFromStorage && typeof workoutFromStorage === 'object'
         ? workoutFromStorage
-        : makeWorkoutState(todaySchedule.exercises);
+        : {};
       const meals = Array.isArray(parsed.meals) ? parsed.meals : [];
       const proteinEvents = Array.isArray(parsed.proteinEvents)
         ? parsed.proteinEvents.filter((event) => event && !event.label?.startsWith('AI:'))
@@ -644,10 +608,10 @@ function FitnessApp() {
     return {
       protein: 0,
       proteinEvents: [] as ProteinEvent[],
-      workout: makeWorkoutState(todaySchedule.exercises),
+      workout: {} as WorkoutState,
       meals: [] as MealEntry[]
     };
-  }, [storageKey, todaySchedule]);
+  }, [storageKey]);
 
   const initialDailyLog = useMemo(() => loadInitialData(), [loadInitialData]);
   const [protein, setProtein] = useState<number>(initialDailyLog.protein);
@@ -669,14 +633,16 @@ function FitnessApp() {
     mealsRef.current = meals;
   }, [meals]);
 
-  const [activeTab, setActiveTab] = useState<'workout' | 'nutrition' | 'protein' | 'progress'>('workout');
+  const [activeTab, setActiveTab] = useState<MainTab>('nutrition');
   const [coachOpen, setCoachOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const saved = window.localStorage.getItem(MOBILE_TAB_STORAGE_KEY);
-    if (saved === 'workout' || saved === 'nutrition' || saved === 'protein' || saved === 'progress') {
+    if (saved === 'nutrition' || saved === 'protein' || saved === 'progress') {
       setActiveTab(saved);
+    } else if (saved === 'workout') {
+      setActiveTab('nutrition');
     } else if (saved === 'coach') {
       setCoachOpen(true);
     }
@@ -842,7 +808,7 @@ function FitnessApp() {
           const nextMeals = Array.isArray(cloudLog.meals) ? cloudLog.meals : [];
           const nextWorkout = cloudLog.workout && typeof cloudLog.workout === 'object'
             ? cloudLog.workout
-            : makeWorkoutState(todaySchedule.exercises);
+            : {};
           setProtein(sumFiniteNonNegative(nextEvents.map((event) => event.grams)));
           setProteinEvents(nextEvents);
           setWorkoutState(nextWorkout);
@@ -905,7 +871,7 @@ function FitnessApp() {
     return () => {
       cancelled = true;
     };
-  }, [user, coachPersistenceReady, logDate, storageKey, todaySchedule, cloudRetryToken]);
+  }, [user, coachPersistenceReady, logDate, storageKey, cloudRetryToken]);
 
   useEffect(() => {
     if (!user || cloudReadyUserRef.current !== user.id || !coachPersistenceReady) return;
@@ -1079,13 +1045,6 @@ function FitnessApp() {
     window.localStorage.setItem(MOBILE_TAB_STORAGE_KEY, activeTab);
   }, [activeTab]);
 
-  const [selectedExerciseLabel, setSelectedExerciseLabel] = useState<string | null>(null);
-
-  const selectedExerciseDetail = useMemo(() => {
-    if (!selectedExerciseLabel) return null;
-    return resolveExerciseDetailFromLabel(selectedExerciseLabel);
-  }, [selectedExerciseLabel]);
-
   // --- AI Nutrition ---
   const [aiOpen, setAiOpen] = useState<boolean>(false);
   const [aiText, setAiText] = useState<string>('');
@@ -1191,34 +1150,6 @@ function FitnessApp() {
     setProtein(newProtein);
     setProteinEvents(newEvents);
     scheduleSave(newProtein, newEvents, workoutState, mealsRef.current);
-  };
-
-  const bumpExercise = (exercise: string, delta: 1 | -1) => {
-    setWorkoutState(prev => {
-      const current = prev[exercise] ?? { target: parseWorkoutTarget(exercise), count: 0 };
-      const nextCount = Math.max(0, Math.min(current.target, current.count + delta));
-      const next = { ...prev, [exercise]: { ...current, count: nextCount } };
-      scheduleSave(protein, proteinEvents, next, mealsRef.current);
-      if (delta === 1 && current.count < current.target && nextCount >= current.target) {
-        window.setTimeout(() => celebrate({
-          title: 'ครบเซตแล้ว!',
-          message: 'พักหายใจนิดหนึ่ง แล้วค่อยไปต่ออย่างสบาย ๆ',
-          mood: 'workout',
-        }), 0);
-      }
-      return next;
-    });
-  };
-
-  const incrementExercise = (exercise: string) => bumpExercise(exercise, 1);
-
-  const resetExercise = (exercise: string) => {
-    setWorkoutState(prev => {
-      const current = prev[exercise] ?? { target: parseWorkoutTarget(exercise), count: 0 };
-      const next = { ...prev, [exercise]: { ...current, count: 0 } };
-      scheduleSave(protein, proteinEvents, next, mealsRef.current);
-      return next;
-    });
   };
 
   const analyzeNutrition = async () => {
@@ -1331,7 +1262,7 @@ function FitnessApp() {
   ), []);
 
   const resetAllToday = () => {
-    const nextWorkout = makeWorkoutState(todaySchedule.exercises);
+    const nextWorkout = {};
     setProtein(0);
     setProteinEvents([]);
     setWorkoutState(nextWorkout);
@@ -1369,10 +1300,10 @@ function FitnessApp() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!isMobile) return;
-    if (aiOpen || selectedExerciseLabel) return;
+    if (aiOpen) return;
     const behavior: ScrollBehavior = prefersReducedMotion ? 'auto' : 'smooth';
     window.scrollTo({ top: 0, behavior });
-  }, [activeTab, isMobile, prefersReducedMotion, aiOpen, selectedExerciseLabel]);
+  }, [activeTab, isMobile, prefersReducedMotion, aiOpen]);
 
   return (
     <div className="cozy-app min-h-screen text-neutral-900 dark:text-white selection:bg-[#d98c68]/25 font-sans transition-colors duration-500 ease-in-out">
@@ -1439,7 +1370,6 @@ function FitnessApp() {
 
           <div className="space-y-2">
             {[
-              { id: 'workout', icon: Dumbbell, label: 'ออกกำลังกาย' },
               { id: 'nutrition', icon: Utensils, label: 'โภชนาการ' },
               { id: 'protein', icon: Zap, label: 'เพิ่มโปรตีน' },
               { id: 'progress', icon: ChartLine, label: 'ความก้าวหน้า' },
@@ -1448,7 +1378,7 @@ function FitnessApp() {
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as 'workout' | 'nutrition' | 'protein' | 'progress')}
+                  onClick={() => setActiveTab(tab.id as MainTab)}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-500 ease-in-out ${
                     isActive 
                       ? 'border border-[#d98c68]/25 bg-[#d98c68]/12 font-bold text-[#a96550] shadow-[0_8px_20px_rgba(177,105,75,0.1)] dark:text-[#f2b095]'
@@ -1542,14 +1472,14 @@ function FitnessApp() {
             <div className="absolute -right-8 -top-10 h-32 w-32 rounded-full bg-[#f2cd72]/25 blur-2xl" />
             <div className="absolute -bottom-12 right-20 h-32 w-32 rounded-full bg-[#f4b89c]/20 blur-2xl" />
             <div className="relative flex items-center gap-4">
-              <MochiMascot mood={activeTab === 'workout' ? 'workout' : activeTab === 'nutrition' ? 'food' : 'hello'} size="lg" />
+              <MochiMascot mood={activeTab === 'nutrition' ? 'food' : 'hello'} size="lg" />
               <div className="min-w-0">
                 <div className="text-xs font-extrabold tracking-[0.18em] text-[#a17c62] uppercase dark:text-[#d4bfa2]">ความก้าวหน้าเล็ก ๆ ของวันนี้</div>
                 <h1 className="mt-1 text-xl font-black tracking-tight text-[#55483d] sm:text-2xl dark:text-[#fff4df]">
                   ค่อย ๆ ไป แต่ไปด้วยกันนะ
                 </h1>
                 <p className="mt-1 text-sm text-[#7d6b5d] dark:text-[#d7c5aa]">
-                  วันนี้คือ <span className="font-bold text-[#b66f50] dark:text-[#f2b095]">{todaySchedule.title}</span> — ทำเท่าที่ไหวก็ถือว่าเก่งมากแล้ว
+                  บันทึกอาหาร โปรตีน และความก้าวหน้าทีละนิด — ทำเท่าที่ไหวก็ถือว่าเก่งมากแล้ว
                 </p>
               </div>
             </div>
@@ -1557,79 +1487,6 @@ function FitnessApp() {
 
           {/* Tab Content */}
           <AnimatePresence mode="wait" initial={false}>
-
-          {activeTab === 'workout' && (
-            <motion.div
-              key="workout"
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              transition={{ duration: 0.2 }}
-              className="space-y-4"
-            >
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold text-neutral-900 dark:text-white">แผนของวันนี้</h2>
-                <span className="rounded-lg border border-[#d98c68]/20 bg-[#d98c68]/10 px-2 py-1 text-xs font-bold text-[#a96550] dark:text-[#f2b095]">
-                  {todaySchedule.title}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {todaySchedule.exercises.map((ex, i) => {
-                   const item = workoutState[ex] ?? { target: parseWorkoutTarget(ex), count: 0 };
-                   const done = item.count >= item.target;
-                   
-                   return (
-                    <motion.div
-                      key={ex}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: i * 0.05 }}
-                      onClick={() => setSelectedExerciseLabel(ex)}
-                      className={`group relative overflow-hidden rounded-[1.5rem] border p-4 transition-all duration-500 ease-in-out active:scale-[0.98] h-full backdrop-blur-md
-                        ${done 
-                          ? 'border-[#d98c68]/28 bg-[#fae9dd] shadow-[0_12px_28px_rgba(177,105,75,0.1)] dark:border-[#d98c68]/25 dark:bg-[#60483b]/60'
-                          : 'bg-[#fffdf8]/85 dark:bg-[#443a32]/80 border-[#8f765d]/10 dark:border-white/5 hover:border-[#d98c68]/25 hover:-translate-y-0.5 hover:shadow-[0_14px_32px_rgba(105,82,57,0.1)]'
-                        }`}
-                    >
-                      <div className="flex items-center gap-4 h-full">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all shrink-0
-                          ${done 
-                            ? 'border-[#d98c68] bg-[#d98c68] text-white shadow-[0_8px_18px_rgba(177,105,75,0.25)]'
-                            : 'border-emerald-900/10 dark:border-white/10 bg-emerald-900/5 dark:bg-white/5 text-emerald-900/40 dark:text-emerald-100/40'
-                          }`}>
-                          {done ? <CheckCircle2 className="w-5 h-5" /> : <span className="text-sm font-bold">{i + 1}</span>}
-                        </div>
-                        
-                        <div className="flex-1 min-w-0">
-                          <h3 className={`font-bold text-base truncate transition-colors ${done ? 'text-[#a96550] dark:text-[#f2b095]' : 'text-neutral-900 dark:text-white'}`}>
-                            {ex}
-                          </h3>
-                          <div className="flex items-center gap-2 mt-1">
-                            <div className="h-1.5 flex-1 bg-neutral-200 dark:bg-neutral-800 rounded-full overflow-hidden">
-                              <motion.div 
-                                className="h-full bg-[#d98c68]"
-                                initial={{ width: 0 }}
-                                animate={{ width: `${(item.count / item.target) * 100}%` }}
-                              />
-                            </div>
-                            <span className="text-xs font-medium text-emerald-900/40 dark:text-emerald-100/40 whitespace-nowrap">{item.count}/{item.target}</span>
-                          </div>
-                        </div>
-
-                        <button
-                          onClick={(e) => { e.stopPropagation(); incrementExercise(ex); }}
-                          className="w-10 h-10 rounded-xl bg-emerald-900/5 dark:bg-white/5 hover:bg-emerald-900/10 dark:hover:bg-white/10 flex items-center justify-center text-neutral-900 dark:text-white transition-colors border border-emerald-900/5 dark:border-white/5 shrink-0"
-                        >
-                          <Plus className="w-5 h-5" />
-                        </button>
-                      </div>
-                    </motion.div>
-                   );
-                })}
-              </div>
-            </motion.div>
-          )}
 
           {activeTab === 'nutrition' && (
             <motion.div
@@ -2283,7 +2140,6 @@ function FitnessApp() {
       <div className="fixed inset-x-0 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-40 flex justify-center px-4 md:hidden">
         <div className="flex max-w-full items-center gap-1 rounded-full border border-[#8f765d]/12 bg-[#fffdf8]/92 p-1.5 shadow-[0_14px_36px_rgba(105,82,57,0.16)] backdrop-blur-xl transition-colors duration-500 ease-in-out dark:border-white/10 dark:bg-[#443a32]/92 dark:shadow-black/30">
           {[
-            { id: 'workout', icon: Dumbbell, label: 'ออกกำลัง' },
             { id: 'nutrition', icon: Utensils, label: 'อาหาร' },
             { id: 'protein', icon: Zap, label: 'โปรตีน' },
             { id: 'progress', icon: ChartLine, label: 'สถิติ' },
@@ -2292,7 +2148,7 @@ function FitnessApp() {
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as 'workout' | 'nutrition' | 'protein' | 'progress')}
+                onClick={() => setActiveTab(tab.id as MainTab)}
                 className={`relative flex min-w-0 items-center gap-2 rounded-full px-3.5 py-3 transition-all duration-500 ease-in-out ${
                   isActive ? 'text-white' : 'text-emerald-900/40 dark:text-emerald-100/40 hover:text-emerald-900 dark:hover:text-white'
                 }`}
@@ -2499,86 +2355,11 @@ function FitnessApp() {
         )}
       </AnimatePresence>
 
-      {/* Exercise Detail Modal */}
-      <AnimatePresence>
-        {selectedExerciseLabel && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
-            onClick={() => setSelectedExerciseLabel(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              onClick={(e) => e.stopPropagation()}
-              className="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-3xl border border-[#8f765d]/12 bg-[#fffdf8] text-[#55483d] shadow-2xl dark:border-white/10 dark:bg-[#443a32] dark:text-[#fff4df]"
-            >
-              <div className="flex items-start justify-between border-b border-[#8f765d]/10 bg-[#f1e4cf]/55 p-5 dark:border-white/10 dark:bg-[#55483d]/55">
-                <div>
-                  <h3 className="text-xl font-bold text-white">{selectedExerciseDetail?.thaiName ?? selectedExerciseLabel}</h3>
-                  <p className="text-sm text-emerald-100/60">{selectedExerciseDetail?.primary?.join(', ') ?? 'Exercise Details'}</p>
-                </div>
-                <button onClick={() => setSelectedExerciseLabel(null)} className="p-2 rounded-full hover:bg-white/10 text-emerald-100/60 hover:text-white">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              
-              <div className="p-5 overflow-y-auto space-y-6">
-                 {/* Focus */}
-                 <div className="space-y-2">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400">จุดที่ควรโฟกัส</h4>
-                    <div className="flex flex-wrap gap-2">
-                       {(selectedExerciseDetail?.focus ?? []).map((f, i) => (
-                          <span key={i} className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-bold border border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.1)]">
-                             {f}
-                          </span>
-                       ))}
-                    </div>
-                 </div>
-
-                 {/* Steps */}
-                 <div className="space-y-2">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-100/40">วิธีทำ</h4>
-                    <ol className="list-decimal list-inside space-y-1 text-sm text-emerald-100/80">
-                       {(selectedExerciseDetail?.steps ?? []).map((s, i) => (
-                          <li key={i} className="leading-relaxed">{s}</li>
-                       ))}
-                    </ol>
-                 </div>
-
-                 {/* Controls */}
-                 <div className="pt-4 border-t border-white/10 flex gap-3">
-                    <button
-                       onClick={() => {
-                          if (selectedExerciseLabel) incrementExercise(selectedExerciseLabel);
-                       }}
-                       className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2 shadow-[0_0_10px_rgba(16,185,129,0.4)]"
-                    >
-                       <Plus className="w-4 h-4" /> Add Set
-                    </button>
-                    <button
-                       onClick={() => {
-                          if (selectedExerciseLabel) resetExercise(selectedExerciseLabel);
-                       }}
-                       className="px-4 bg-white/5 hover:bg-white/10 text-white font-bold py-3 rounded-xl transition-colors border border-white/5"
-                    >
-                       <RotateCw className="w-4 h-4" />
-                    </button>
-                 </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Dialogs */}
       <ConfirmDialog
         open={confirmResetOpen}
         title="เริ่มข้อมูลวันนี้ใหม่?"
-        description="ความคืบหน้าการออกกำลังกาย โปรตีน และมื้ออาหารวันนี้จะถูกล้าง"
+        description="โปรตีน มื้ออาหาร และสรุปของวันนี้จะถูกล้าง"
         confirmLabel="เริ่มใหม่"
         variant="danger"
         prefersReducedMotion={prefersReducedMotion}

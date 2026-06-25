@@ -25,16 +25,10 @@ type ProteinEvent = {
   grams?: number;
 };
 
-type WorkoutItem = {
-  target?: number;
-  count?: number;
-};
-
 type DailyLogRow = {
   log_date: string;
   protein_g: number | string;
   protein_events: ProteinEvent[] | null;
-  workout: Record<string, WorkoutItem> | null;
   meals: Meal[] | null;
 };
 
@@ -67,7 +61,6 @@ type DaySnapshot = {
   carbsG: number;
   fatG: number;
   mealCount: number;
-  workoutCompletionPercent: number | null;
 };
 
 type WeeklySnapshot = {
@@ -81,7 +74,6 @@ type WeeklySnapshot = {
   aggregates: {
     checkinDays: number;
     nutritionLoggedDays: number;
-    trainingLoggedDays: number;
     weightLoggedDays: number;
     waistLoggedDays: number;
     averageCaloriesKcal: number | null;
@@ -89,7 +81,6 @@ type WeeklySnapshot = {
     averageSleepHours: number | null;
     averageHunger: number | null;
     averageEnergy: number | null;
-    workoutCompletionAverage: number | null;
     weightChangeKg: number | null;
     waistChangeIn: number | null;
     sleepHungerCorrelation: number | null;
@@ -121,9 +112,9 @@ const reviewSchema = {
         waist: { type: 'string' },
         nutrition: { type: 'string' },
         sleepAndHunger: { type: 'string' },
-        training: { type: 'string' },
+        consistency: { type: 'string' },
       },
-      required: ['weight', 'waist', 'nutrition', 'sleepAndHunger', 'training'],
+      required: ['weight', 'waist', 'nutrition', 'sleepAndHunger', 'consistency'],
     },
     possiblePlateauReasons: { type: 'array', maxItems: 4, items: { type: 'string' } },
     nextWeekPlan: { type: 'array', maxItems: 3, items: { type: 'string' } },
@@ -210,14 +201,6 @@ function summarizeNutrition(row: DailyLogRow | undefined) {
   };
 }
 
-function workoutCompletion(workout: Record<string, WorkoutItem> | null | undefined): number | null {
-  const items = workout && typeof workout === 'object' ? Object.values(workout) : [];
-  if (!items.length) return null;
-  const target = items.reduce((sum, item) => sum + Math.max(0, finite(item.target) ?? 0), 0);
-  const count = items.reduce((sum, item) => sum + Math.max(0, finite(item.count) ?? 0), 0);
-  return target > 0 ? Math.round(Math.min(count / target, 1) * 100) : null;
-}
-
 function waistToInches(value: unknown): number | null {
   const stored = finite(value);
   if (stored === null) return null;
@@ -228,12 +211,11 @@ function waistToInches(value: unknown): number | null {
 }
 
 function dataQuality(snapshot: WeeklySnapshot) {
-  const possible = 7 * 5;
+  const possible = 7 * 4;
   const collected = snapshot.aggregates.checkinDays
     + snapshot.aggregates.nutritionLoggedDays
     + snapshot.aggregates.weightLoggedDays
-    + snapshot.aggregates.waistLoggedDays
-    + snapshot.aggregates.trainingLoggedDays;
+    + snapshot.aggregates.waistLoggedDays;
   return Math.round((collected / possible) * 100);
 }
 
@@ -258,7 +240,9 @@ function offlineReview(snapshot: WeeklySnapshot): WeeklyReview {
     wins: [
       `บันทึก Check-in ${snapshot.aggregates.checkinDays} วัน`,
       `บันทึกอาหาร ${snapshot.aggregates.nutritionLoggedDays} วัน`,
-      `มีข้อมูลการซ้อม ${snapshot.aggregates.trainingLoggedDays} วัน`,
+      snapshot.aggregates.checkinDays >= 4 || snapshot.aggregates.nutritionLoggedDays >= 4
+        ? 'มีความสม่ำเสมอในการเก็บข้อมูลพอให้เริ่มเห็นภาพรวม'
+        : 'เริ่มสร้างฐานข้อมูลส่วนตัวสำหรับให้ AI วิเคราะห์ได้แล้ว',
     ].filter((text) => !text.includes(' 0 ')),
     trends: {
       weight: weightChange === null
@@ -273,9 +257,7 @@ function offlineReview(snapshot: WeeklySnapshot): WeeklyReview {
       sleepAndHunger: snapshot.aggregates.averageSleepHours === null
         ? 'ข้อมูลการนอนและความหิวยังไม่พอ'
         : `นอนเฉลี่ย ${snapshot.aggregates.averageSleepHours.toFixed(1)} ชั่วโมง และความหิวเฉลี่ย ${snapshot.aggregates.averageHunger?.toFixed(1) ?? '-'} จาก 5`,
-      training: snapshot.aggregates.workoutCompletionAverage === null
-        ? 'ข้อมูลการออกกำลังกายยังไม่พอ'
-        : `ทำตามแผนออกกำลังกายเฉลี่ย ${Math.round(snapshot.aggregates.workoutCompletionAverage)}% ในวันที่มีการบันทึก`,
+      consistency: `บันทึก Check-in ${snapshot.aggregates.checkinDays}/7 วัน และโภชนาการ ${snapshot.aggregates.nutritionLoggedDays}/7 วัน ยิ่งครบมาก AI จะยิ่งเห็นรูปแบบชีวิตจริงของคุณชัดขึ้น`,
     },
     possiblePlateauReasons: quality < 50
       ? ['ข้อมูลยังไม่ครบพอที่จะบอกเหตุผลของน้ำหนักนิ่งได้อย่างน่าเชื่อถือ']
@@ -318,7 +300,7 @@ export async function POST(request: Request) {
   const [logsResult, checkinsResult, measurementsResult] = await Promise.all([
     supabase
       .from('daily_logs')
-      .select('log_date, protein_g, protein_events, workout, meals')
+      .select('log_date, protein_g, protein_events, meals')
       .eq('user_id', authData.user.id)
       .gte('log_date', weekStart)
       .lte('log_date', weekEnd),
@@ -366,7 +348,6 @@ export async function POST(request: Request) {
       hungerLevel: checkin?.hunger_level ?? null,
       mood: checkin?.mood ?? null,
       ...nutrition,
-      workoutCompletionPercent: workoutCompletion(log?.workout),
     };
   });
 
@@ -384,7 +365,6 @@ export async function POST(request: Request) {
   const weekWeights = weekMeasurements.map((row) => finite(row.weight_kg));
   const weekWaists = weekMeasurements.map((row) => waistToInches(row.waist_cm));
   const nutritionDays = days.filter((day) => day.mealCount > 0 || day.proteinG > 0);
-  const trainingDays = days.filter((day) => day.workoutCompletionPercent !== null);
 
   const snapshot: WeeklySnapshot = {
     weekStart,
@@ -402,7 +382,6 @@ export async function POST(request: Request) {
         || day.mood !== null
       )).length,
       nutritionLoggedDays: nutritionDays.length,
-      trainingLoggedDays: trainingDays.length,
       weightLoggedDays: weekWeights.filter((value) => value !== null).length,
       waistLoggedDays: weekWaists.filter((value) => value !== null).length,
       averageCaloriesKcal: average(nutritionDays.map((day) => day.caloriesKcal)),
@@ -410,7 +389,6 @@ export async function POST(request: Request) {
       averageSleepHours: average(days.map((day) => day.sleepHours)),
       averageHunger: average(days.map((day) => day.hungerLevel)),
       averageEnergy: average(days.map((day) => day.energyLevel)),
-      workoutCompletionAverage: average(trainingDays.map((day) => day.workoutCompletionPercent)),
       weightChangeKg: difference([
         baselineWeight,
         ...weekWeights,
@@ -469,11 +447,12 @@ export async function POST(request: Request) {
 หลักการ:
 - วิเคราะห์เฉพาะข้อมูลที่ให้มา และระบุข้อจำกัดเมื่อข้อมูลไม่ครบ
 - เน้นแนวโน้มหลายวัน ไม่ตัดสินจากน้ำหนักวันเดียว
-- วิเคราะห์การกิน การนอน ความหิว พลังงาน รอบเอว น้ำหนัก และการซ้อมร่วมกัน
+- วิเคราะห์การกิน การนอน ความหิว พลังงาน รอบเอว น้ำหนัก และความสม่ำเสมอในการบันทึกร่วมกัน
 - หากน้ำหนักนิ่ง ให้เสนอ "สาเหตุที่เป็นไปได้" เท่านั้น ห้ามฟันธง
 - ห้ามวินิจฉัยโรค ห้ามแนะนำลดแคลอรีรุนแรง
 - ให้แผนสัปดาห์หน้าเพียง 3 ข้อที่วัดผลและทำได้จริง
 - คะแนนคุณภาพข้อมูล 0–100 ต้องสอดคล้องกับจำนวนวันที่บันทึก
+- แนวทางของแอพคือ โภชนาการ + ความก้าวหน้า + AI review + คำแนะนำ ไม่ใช่แอพตารางออกกำลังกาย
 
 ข้อมูลสรุปที่คำนวณแล้ว:
 ${JSON.stringify(snapshot)}

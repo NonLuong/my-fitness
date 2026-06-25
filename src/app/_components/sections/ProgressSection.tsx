@@ -490,7 +490,7 @@ export function ProgressSection(props: ProgressSectionProps) {
                   ['รอบเอว', weeklyReview.review.trends.waist],
                   ['โภชนาการ', weeklyReview.review.trends.nutrition],
                   ['การนอนกับความหิว', weeklyReview.review.trends.sleepAndHunger],
-                  ['การออกกำลังกาย', weeklyReview.review.trends.training],
+                  ['ความสม่ำเสมอ', weeklyReview.review.trends.consistency],
                 ].map(([label, value]) => (
                   <div key={label} className="rounded-2xl border border-[#8f765d]/9 bg-white/42 p-3 dark:bg-black/10">
                     <div className="text-[10px] font-black text-[#a96550] dark:text-[#f2b095]">{label}</div>

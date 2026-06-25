@@ -12,7 +12,7 @@ export type WeeklyReview = {
     waist: string;
     nutrition: string;
     sleepAndHunger: string;
-    training: string;
+    consistency: string;
   };
   possiblePlateauReasons: string[];
   nextWeekPlan: string[];
