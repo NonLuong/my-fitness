@@ -1261,15 +1261,6 @@ function FitnessApp() {
     ]
   ), []);
 
-  const resetAllToday = () => {
-    const nextWorkout = {};
-    setProtein(0);
-    setProteinEvents([]);
-    setWorkoutState(nextWorkout);
-    setMeals([]);
-    scheduleSave(0, [], nextWorkout, []);
-  };
-
   const prefersReducedMotion = usePrefersReducedMotion();
   const proteinAnimated = useAnimatedNumber(totalProtein);
   const kcalAnimated = useAnimatedNumber(mealTotals.caloriesKcal);
@@ -1277,7 +1268,6 @@ function FitnessApp() {
   const cAnimated = useAnimatedNumber(mealTotals.carbsG);
   const fAnimated = useAnimatedNumber(mealTotals.fatG);
 
-  const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const [mealToDelete, setMealToDelete] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1340,13 +1330,6 @@ function FitnessApp() {
                 </button>
              </div>
 
-             <button 
-                onClick={() => setConfirmResetOpen(true)}
-                aria-label="รีเซ็ตข้อมูลวันนี้"
-                className="p-2 rounded-full hover:bg-emerald-900/5 dark:hover:bg-white/5 text-emerald-900/60 dark:text-emerald-100/60 hover:text-emerald-900 dark:hover:text-white transition-colors"
-             >
-                <RotateCw className="w-5 h-5" />
-             </button>
              <AuthButton compact />
              <div className="hidden rounded-full bg-[#f1e4cf] px-3 py-1 text-[10px] font-bold text-[#8a6b55] sm:block dark:bg-white/5 dark:text-[#dbc8ac]">โหมดดูแลใจและกาย</div>
           </div>
@@ -1452,13 +1435,6 @@ function FitnessApp() {
                 </button>
              </div>
 
-             <button 
-                onClick={() => setConfirmResetOpen(true)}
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-emerald-900/60 dark:text-emerald-100/60 hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-             >
-                <RotateCw className="w-5 h-5" />
-                <span className="font-medium">เริ่มข้อมูลวันนี้ใหม่</span>
-             </button>
           </div>
         </nav>
 
@@ -2356,20 +2332,6 @@ function FitnessApp() {
       </AnimatePresence>
 
       {/* Dialogs */}
-      <ConfirmDialog
-        open={confirmResetOpen}
-        title="เริ่มข้อมูลวันนี้ใหม่?"
-        description="โปรตีน มื้ออาหาร และสรุปของวันนี้จะถูกล้าง"
-        confirmLabel="เริ่มใหม่"
-        variant="danger"
-        prefersReducedMotion={prefersReducedMotion}
-        onClose={() => setConfirmResetOpen(false)}
-        onConfirm={() => {
-          setConfirmResetOpen(false);
-          resetAllToday();
-        }}
-      />
-
       <ConfirmDialog
         open={!!mealToDelete}
         title="ลบมื้อนี้?"
