@@ -635,6 +635,7 @@ function FitnessApp() {
 
   const [activeTab, setActiveTab] = useState<MainTab>('nutrition');
   const [coachOpen, setCoachOpen] = useState(false);
+  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -661,6 +662,20 @@ function FitnessApp() {
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [coachOpen]);
+
+  useEffect(() => {
+    if (!profileEditorOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setProfileEditorOpen(false);
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [profileEditorOpen]);
 
   // --- Coach Logic ---
   const [coachStep, setCoachStep] = useState(1);
@@ -713,7 +728,7 @@ function FitnessApp() {
   const coachMessagesEndRef = useRef<HTMLDivElement | null>(null);
   const coachInputRef = useRef<HTMLInputElement | null>(null);
 
-  const parseOptionalNumber = (raw: string, opts?: { min?: number; max?: number }) => {
+  const parseOptionalNumber = useCallback((raw: string, opts?: { min?: number; max?: number }) => {
     const t = raw.trim().replace(',', '.');
     if (!t) return undefined;
     const v = Number(t);
@@ -721,11 +736,38 @@ function FitnessApp() {
     const min = opts?.min ?? -Infinity;
     const max = opts?.max ?? Infinity;
     return clamp(v, min, max);
-  };
+  }, []);
 
   const commitNumber = <K extends keyof CoachProfile>(key: K, raw: string, opts?: { min?: number; max?: number }) => {
     const v = parseOptionalNumber(raw, opts);
     setCoachProfile((p) => ({ ...p, [key]: v as CoachProfile[K] }));
+  };
+
+  const formatDraftNumber = (value: number | undefined) => (
+    typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
+  );
+
+  const syncDraftFromProfile = () => {
+    setDraftProfile((current) => ({
+      ...current,
+      ageYears: formatDraftNumber(coachProfile.ageYears),
+      heightCm: formatDraftNumber(coachProfile.heightCm),
+      weightKg: formatDraftNumber(coachProfile.weightKg),
+      waistIn: formatDraftNumber(coachProfile.waistIn),
+      hipIn: formatDraftNumber(coachProfile.hipIn),
+      chestIn: formatDraftNumber(coachProfile.chestIn),
+      neckIn: formatDraftNumber(coachProfile.neckIn),
+      armIn: formatDraftNumber(coachProfile.armIn),
+      thighIn: formatDraftNumber(coachProfile.thighIn),
+      targetWeightKg: formatDraftNumber(coachProfile.targetWeightKg),
+      targetWeeks: formatDraftNumber(coachProfile.targetWeeks),
+      trainingDaysPerWeek: formatDraftNumber(coachProfile.trainingDaysPerWeek),
+    }));
+  };
+
+  const openHealthProfileEditor = () => {
+    syncDraftFromProfile();
+    setProfileEditorOpen(true);
   };
 
   useEffect(() => {
@@ -956,6 +998,62 @@ function FitnessApp() {
       desiredDeltaKgPerWeek,
     };
   }, [coachProfile]);
+
+  const draftProfilePreview = useMemo(() => {
+    const nextProfile: CoachProfile = {
+      ...coachProfile,
+      ageYears: parseOptionalNumber(draftProfile.ageYears, { min: 10, max: 90 }),
+      heightCm: parseOptionalNumber(draftProfile.heightCm, { min: 120, max: 230 }),
+      weightKg: parseOptionalNumber(draftProfile.weightKg, { min: 30, max: 250 }),
+      waistIn: parseOptionalNumber(draftProfile.waistIn, { min: 1, max: 90 }),
+      hipIn: parseOptionalNumber(draftProfile.hipIn, { min: 1, max: 120 }),
+      chestIn: parseOptionalNumber(draftProfile.chestIn, { min: 1, max: 120 }),
+      neckIn: parseOptionalNumber(draftProfile.neckIn, { min: 1, max: 40 }),
+      armIn: parseOptionalNumber(draftProfile.armIn, { min: 1, max: 60 }),
+      thighIn: parseOptionalNumber(draftProfile.thighIn, { min: 1, max: 80 }),
+      targetWeightKg: parseOptionalNumber(draftProfile.targetWeightKg, { min: 30, max: 300 }),
+      targetWeeks: parseOptionalNumber(draftProfile.targetWeeks, { min: 1, max: 52 }),
+      trainingDaysPerWeek: parseOptionalNumber(draftProfile.trainingDaysPerWeek, { min: 0, max: 7 }),
+    };
+
+    const heightCm = nextProfile.heightCm ?? 0;
+    const weightKg = nextProfile.weightKg ?? 0;
+    const ageYears = nextProfile.ageYears ?? 0;
+    const bmr = ageYears > 0 && heightCm > 0 && weightKg > 0
+      ? calcBmrMifflinStJeor(nextProfile.sex, ageYears, heightCm, weightKg)
+      : 0;
+    const tdee = bmr * ACTIVITY_MULTIPLIERS[nextProfile.activity];
+    let target = goalKcalTarget(tdee, nextProfile.goal);
+    const desiredDeltaKgPerWeek =
+      nextProfile.targetWeightKg && nextProfile.targetWeeks
+        ? calcDailyWeightChangeFromTarget(weightKg, nextProfile.targetWeightKg, nextProfile.targetWeeks)
+        : null;
+    const desiredAdj = desiredDeltaKgPerWeek !== null ? kcalAdjustmentForRate(desiredDeltaKgPerWeek) : null;
+    if (desiredAdj !== null && Number.isFinite(desiredAdj)) {
+      target = clamp(target + desiredAdj, Math.max(1200, tdee - 1200), tdee + 1200);
+    }
+
+    return {
+      profile: nextProfile,
+      canSave: Boolean(
+        nextProfile.ageYears
+        && nextProfile.heightCm
+        && nextProfile.weightKg
+      ),
+      target,
+      tdee,
+      proteinRange: proteinRangeG(weightKg || 70, nextProfile.goal),
+    };
+  }, [coachProfile, draftProfile, parseOptionalNumber]);
+
+  const saveHealthProfile = () => {
+    if (!draftProfilePreview.canSave) return;
+    setCoachProfile(draftProfilePreview.profile);
+    setCoachStep(5);
+    setProfileEditorOpen(false);
+    setCoachSuccessOpen(true);
+    window.setTimeout(() => setCoachSuccessOpen(false), 1600);
+  };
 
   const canSubmitCoach = useMemo(() => {
     if (!coachProfile.ageYears || !coachProfile.heightCm || !coachProfile.weightKg) return false;
@@ -1252,6 +1350,12 @@ function FitnessApp() {
     ? coachDerived.proteinRange[1]
     : 180;
   const progress = Math.min((totalProtein / proteinGoal) * 100, 100);
+  const healthSummary = useMemo(() => ({
+    goalLabel: goalLabelTh(coachProfile.goal),
+    targetKcal: round(coachDerived.target),
+    proteinGoal,
+    weightKg: coachProfile.weightKg,
+  }), [coachDerived.target, coachProfile.goal, coachProfile.weightKg, proteinGoal]);
 
   const proteinItems = useMemo(() => (
     [
@@ -1330,7 +1434,11 @@ function FitnessApp() {
                 </button>
              </div>
 
-             <AuthButton compact />
+             <AuthButton
+               compact
+               healthSummary={healthSummary}
+               onEditHealthProfile={openHealthProfileEditor}
+             />
              <div className="hidden rounded-full bg-[#f1e4cf] px-3 py-1 text-[10px] font-bold text-[#8a6b55] sm:block dark:bg-white/5 dark:text-[#dbc8ac]">โหมดดูแลใจและกาย</div>
           </div>
         </div>
@@ -1378,7 +1486,10 @@ function FitnessApp() {
           </div>
 
           <div className="pt-6 mt-auto border-t border-emerald-900/5 dark:border-white/5 space-y-3">
-             <AuthButton />
+             <AuthButton
+               healthSummary={healthSummary}
+               onEditHealthProfile={openHealthProfileEditor}
+             />
              {user && (
                <div className={`px-2 text-[10px] font-bold ${
                  cloudSyncState === 'error'
@@ -1928,10 +2039,13 @@ function FitnessApp() {
                       <p className="text-xs text-emerald-900/50 dark:text-emerald-100/50">ใช้ข้อมูลนี้ประกอบคำแนะนำของโค้ช</p>
                     </div>
                     <button
-                      onClick={() => setCoachStep(1)}
+                      onClick={() => {
+                        setCoachOpen(false);
+                        openHealthProfileEditor();
+                      }}
                       className="rounded-full bg-emerald-900/5 px-3 py-2 text-[11px] font-bold text-emerald-900/60 transition hover:bg-emerald-900/10 hover:text-neutral-900 dark:bg-white/5 dark:text-emerald-100/60 dark:hover:bg-white/10 dark:hover:text-white"
                     >
-                      แก้ไขข้อมูล
+                      แก้ในบัญชี
                     </button>
                   </div>
 
@@ -2111,6 +2225,260 @@ function FitnessApp() {
         </aside>
 
       </div>
+
+      <AnimatePresence>
+        {profileEditorOpen && (
+          <motion.div
+            className="fixed inset-0 z-[90] grid min-h-[100dvh] place-items-center overflow-y-auto bg-[#342d27]/45 p-4 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setProfileEditorOpen(false)}
+          >
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-label="แก้ไขข้อมูลสุขภาพและเป้าหมาย"
+              initial={prefersReducedMotion ? false : { opacity: 0, y: 18, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={prefersReducedMotion ? undefined : { opacity: 0, y: 12, scale: 0.97 }}
+              onClick={(event) => event.stopPropagation()}
+              className="my-auto flex max-h-[92dvh] w-full max-w-3xl flex-col overflow-hidden rounded-[2rem] border border-[#8f765d]/12 bg-[#fffaf2] text-[#55483d] shadow-[0_28px_80px_rgba(58,43,31,0.28)] dark:border-white/10 dark:bg-[#443a32] dark:text-[#fff4df]"
+            >
+              <div className="flex shrink-0 items-start justify-between gap-4 border-b border-[#8f765d]/10 p-5 dark:border-white/8 sm:p-6">
+                <div className="flex items-center gap-3">
+                  <MochiMascot mood="hello" size="md" />
+                  <div>
+                    <h2 className="text-xl font-black">ข้อมูลสุขภาพและเป้าหมาย</h2>
+                    <p className="text-xs text-[#937b67] dark:text-[#d7c5aa]">
+                      ใช้คำนวณพลังงาน โปรตีน และเป็นข้อมูลตั้งต้นให้ AI Coach
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setProfileEditorOpen(false)}
+                  aria-label="ปิด"
+                  className="rounded-full p-2 text-[#8a725f] hover:bg-[#f1e4cf] dark:hover:bg-white/10"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5 sm:p-6">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-3xl border border-[#8f765d]/12 bg-[#fffdf8]/70 p-4 dark:border-white/8 dark:bg-white/5">
+                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-[#a18c79]">TDEE</div>
+                    <div className="mt-1 text-2xl font-black text-[#55483d] dark:text-[#fff4df]">
+                      {round(draftProfilePreview.tdee)}
+                    </div>
+                    <div className="text-[10px] font-bold text-[#a18c79]">kcal/day</div>
+                  </div>
+                  <div className="rounded-3xl border border-[#d98c68]/20 bg-[#d98c68]/12 p-4">
+                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-[#a96550]">เป้าพลังงาน</div>
+                    <div className="mt-1 text-2xl font-black text-[#a96550]">
+                      {round(draftProfilePreview.target)}
+                    </div>
+                    <div className="text-[10px] font-bold text-[#a96550]/70">kcal/day</div>
+                  </div>
+                  <div className="rounded-3xl border border-[#e3b950]/25 bg-[#f2cd72]/20 p-4">
+                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-[#8b6b20]">เป้าโปรตีน</div>
+                    <div className="mt-1 text-2xl font-black text-[#8b6b20]">
+                      {draftProfilePreview.proteinRange[0]}–{draftProfilePreview.proteinRange[1]}g
+                    </div>
+                    <div className="text-[10px] font-bold text-[#8b6b20]/70">ต่อวัน</div>
+                  </div>
+                </div>
+
+                <section className="rounded-3xl border border-[#8f765d]/12 bg-[#fffdf8]/62 p-4 dark:border-white/8 dark:bg-white/5">
+                  <div className="mb-4 flex items-center gap-2">
+                    <User className="h-4 w-4 text-[#b66f50]" />
+                    <h3 className="text-sm font-black">ข้อมูลพื้นฐาน</h3>
+                  </div>
+                  <div className="mb-4 grid grid-cols-2 gap-2">
+                    {(['male', 'female'] as const).map((sex) => (
+                      <button
+                        key={sex}
+                        type="button"
+                        onClick={() => setCoachProfile((profile) => ({ ...profile, sex }))}
+                        className={`rounded-2xl border px-4 py-3 text-sm font-extrabold transition ${
+                          coachProfile.sex === sex
+                            ? 'border-[#d98c68]/35 bg-[#d98c68]/14 text-[#a96550]'
+                            : 'border-[#8f765d]/12 bg-white/50 text-[#725f50] hover:border-[#d98c68]/25 dark:bg-black/10 dark:text-[#fff4df]'
+                        }`}
+                      >
+                        {sex === 'male' ? 'ชาย' : 'หญิง'}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {[
+                      ['ageYears', 'อายุ', 'ปี', '22', { min: 10, max: 90 }],
+                      ['heightCm', 'ส่วนสูง', 'ซม.', '175', { min: 120, max: 230 }],
+                      ['weightKg', 'น้ำหนัก', 'กก.', '80', { min: 30, max: 250 }],
+                    ].map(([key, label, unit, placeholder, limits]) => (
+                      <label key={String(key)} className="space-y-1.5">
+                        <span className="text-xs font-bold text-[#725f50] dark:text-[#ddcbb1]">{String(label)}</span>
+                        <div className="flex items-center gap-2 rounded-2xl border border-[#8f765d]/12 bg-white/65 px-3 dark:bg-black/10">
+                          <input
+                            inputMode="decimal"
+                            value={draftProfile[key as keyof Draft]}
+                            placeholder={String(placeholder)}
+                            onChange={(event) => setDraftProfile((draft) => ({ ...draft, [key as keyof Draft]: event.target.value }))}
+                            onBlur={() => commitNumber(key as keyof CoachProfile, draftProfile[key as keyof Draft], limits as { min: number; max: number })}
+                            className="min-w-0 flex-1 bg-transparent py-3 text-sm font-bold outline-none placeholder:text-[#b3a08f]"
+                          />
+                          <span className="text-[10px] font-bold text-[#a18c79]">{String(unit)}</span>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="rounded-3xl border border-[#8f765d]/12 bg-[#fffdf8]/62 p-4 dark:border-white/8 dark:bg-white/5">
+                  <div className="mb-4 flex items-center gap-2">
+                    <Activity className="h-4 w-4 text-[#b66f50]" />
+                    <h3 className="text-sm font-black">ระดับกิจกรรม</h3>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-5">
+                    {Object.keys(ACTIVITY_MULTIPLIERS).map((activity) => (
+                      <button
+                        key={activity}
+                        type="button"
+                        onClick={() => setCoachProfile((profile) => ({ ...profile, activity: activity as ActivityLevel }))}
+                        className={`rounded-2xl border px-3 py-3 text-left transition ${
+                          coachProfile.activity === activity
+                            ? 'border-[#d98c68]/35 bg-[#d98c68]/14 text-[#a96550]'
+                            : 'border-[#8f765d]/12 bg-white/50 text-[#725f50] hover:border-[#d98c68]/25 dark:bg-black/10 dark:text-[#fff4df]'
+                        }`}
+                      >
+                        <div className="text-xs font-black">
+                          {activity === 'sedentary' && 'น้อย'}
+                          {activity === 'light' && 'เบา'}
+                          {activity === 'moderate' && 'กลาง'}
+                          {activity === 'active' && 'สูง'}
+                          {activity === 'athlete' && 'นักกีฬา'}
+                        </div>
+                        <div className="mt-1 text-[10px] font-medium opacity-70">{activityLabelTh(activity as ActivityLevel)}</div>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="rounded-3xl border border-[#8f765d]/12 bg-[#fffdf8]/62 p-4 dark:border-white/8 dark:bg-white/5">
+                  <div className="mb-4 flex items-center gap-2">
+                    <Weight className="h-4 w-4 text-[#b66f50]" />
+                    <h3 className="text-sm font-black">เป้าหมาย</h3>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                    {(['lose_weight', 'lose_fat', 'maintain', 'gain_muscle', 'gain_weight'] as const).map((goal) => (
+                      <button
+                        key={goal}
+                        type="button"
+                        onClick={() => setCoachProfile((profile) => ({ ...profile, goal }))}
+                        className={`rounded-2xl border px-3 py-3 text-xs font-black transition ${
+                          coachProfile.goal === goal
+                            ? 'border-[#d98c68]/35 bg-[#d98c68]/14 text-[#a96550]'
+                            : 'border-[#8f765d]/12 bg-white/50 text-[#725f50] hover:border-[#d98c68]/25 dark:bg-black/10 dark:text-[#fff4df]'
+                        }`}
+                      >
+                        {goalLabelTh(goal)}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <label className="space-y-1.5">
+                      <span className="text-xs font-bold text-[#725f50] dark:text-[#ddcbb1]">น้ำหนักเป้าหมาย</span>
+                      <div className="flex items-center gap-2 rounded-2xl border border-[#8f765d]/12 bg-white/65 px-3 dark:bg-black/10">
+                        <input
+                          inputMode="decimal"
+                          value={draftProfile.targetWeightKg}
+                          placeholder="ไม่บังคับ"
+                          onChange={(event) => setDraftProfile((draft) => ({ ...draft, targetWeightKg: event.target.value }))}
+                          onBlur={() => commitNumber('targetWeightKg', draftProfile.targetWeightKg, { min: 30, max: 300 })}
+                          className="min-w-0 flex-1 bg-transparent py-3 text-sm font-bold outline-none placeholder:text-[#b3a08f]"
+                        />
+                        <span className="text-[10px] font-bold text-[#a18c79]">กก.</span>
+                      </div>
+                    </label>
+                    <label className="space-y-1.5">
+                      <span className="text-xs font-bold text-[#725f50] dark:text-[#ddcbb1]">ระยะเวลา</span>
+                      <div className="flex items-center gap-2 rounded-2xl border border-[#8f765d]/12 bg-white/65 px-3 dark:bg-black/10">
+                        <input
+                          inputMode="numeric"
+                          value={draftProfile.targetWeeks}
+                          placeholder="ไม่บังคับ"
+                          onChange={(event) => setDraftProfile((draft) => ({ ...draft, targetWeeks: event.target.value }))}
+                          onBlur={() => commitNumber('targetWeeks', draftProfile.targetWeeks, { min: 1, max: 52 })}
+                          className="min-w-0 flex-1 bg-transparent py-3 text-sm font-bold outline-none placeholder:text-[#b3a08f]"
+                        />
+                        <span className="text-[10px] font-bold text-[#a18c79]">สัปดาห์</span>
+                      </div>
+                    </label>
+                  </div>
+                </section>
+
+                <section className="rounded-3xl border border-[#8f765d]/12 bg-[#fffdf8]/62 p-4 dark:border-white/8 dark:bg-white/5">
+                  <div className="mb-4 flex items-center gap-2">
+                    <ChartLine className="h-4 w-4 text-[#b66f50]" />
+                    <h3 className="text-sm font-black">สัดส่วนร่างกาย <span className="font-medium text-[#a18c79]">(ไม่บังคับ)</span></h3>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {[
+                      ['waistIn', 'รอบเอว', 'นิ้ว', '32', { min: 1, max: 90 }],
+                      ['hipIn', 'รอบสะโพก', 'นิ้ว', '38', { min: 1, max: 120 }],
+                      ['chestIn', 'รอบอก', 'นิ้ว', '40', { min: 1, max: 120 }],
+                      ['neckIn', 'รอบคอ', 'นิ้ว', '15', { min: 1, max: 40 }],
+                      ['armIn', 'รอบแขน', 'นิ้ว', 'ไม่บังคับ', { min: 1, max: 60 }],
+                      ['thighIn', 'รอบต้นขา', 'นิ้ว', 'ไม่บังคับ', { min: 1, max: 80 }],
+                    ].map(([key, label, unit, placeholder, limits]) => (
+                      <label key={String(key)} className="space-y-1.5">
+                        <span className="text-xs font-bold text-[#725f50] dark:text-[#ddcbb1]">{String(label)}</span>
+                        <div className="flex items-center gap-2 rounded-2xl border border-[#8f765d]/12 bg-white/65 px-3 dark:bg-black/10">
+                          <input
+                            inputMode="decimal"
+                            value={draftProfile[key as keyof Draft]}
+                            placeholder={String(placeholder)}
+                            onChange={(event) => setDraftProfile((draft) => ({ ...draft, [key as keyof Draft]: event.target.value }))}
+                            onBlur={() => commitNumber(key as keyof CoachProfile, draftProfile[key as keyof Draft], limits as { min: number; max: number })}
+                            className="min-w-0 flex-1 bg-transparent py-3 text-sm font-bold outline-none placeholder:text-[#b3a08f]"
+                          />
+                          <span className="text-[10px] font-bold text-[#a18c79]">{String(unit)}</span>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </section>
+              </div>
+
+              <div className="shrink-0 border-t border-[#8f765d]/10 bg-[#fffaf2]/95 p-4 backdrop-blur-xl dark:border-white/8 dark:bg-[#443a32]/95">
+                {!draftProfilePreview.canSave && (
+                  <div className="mb-3 rounded-2xl bg-[#f2cd72]/20 p-3 text-xs font-semibold text-[#7e621f]">
+                    กรุณากรอกอายุ ส่วนสูง และน้ำหนัก เพื่อให้ระบบคำนวณพลังงานและโปรตีนได้ถูกต้อง
+                  </div>
+                )}
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setProfileEditorOpen(false)}
+                    className="h-12 flex-1 rounded-2xl border border-[#8f765d]/14 bg-white/55 text-sm font-extrabold text-[#725f50] transition hover:bg-[#f1e4cf] dark:bg-white/5 dark:text-[#fff4df] dark:hover:bg-white/10"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!draftProfilePreview.canSave}
+                    onClick={saveHealthProfile}
+                    className="h-12 flex-[1.5] rounded-2xl bg-[#d98c68] text-sm font-extrabold text-white shadow-[0_12px_26px_rgba(177,105,75,0.22)] transition hover:bg-[#c97c5b] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    บันทึกและอัปเดตเป้าหมาย
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Floating Bottom Navigation (Mobile Only) */}
       <div className="fixed inset-x-0 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-40 flex justify-center px-4 md:hidden">
