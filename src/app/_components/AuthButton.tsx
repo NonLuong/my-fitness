@@ -12,7 +12,22 @@ import { MochiMascot } from './MochiMascot';
 
 type AuthMode = 'signin' | 'signup';
 
-export function AuthButton({ compact = false }: { compact?: boolean }) {
+type HealthSummary = {
+  goalLabel: string;
+  targetKcal: number;
+  proteinGoal: number;
+  weightKg?: number;
+};
+
+export function AuthButton({
+  compact = false,
+  healthSummary,
+  onEditHealthProfile,
+}: {
+  compact?: boolean;
+  healthSummary?: HealthSummary;
+  onEditHealthProfile?: () => void;
+}) {
   const { user, loading } = useAuth();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<AuthMode>('signin');
@@ -167,15 +182,51 @@ export function AuthButton({ compact = false }: { compact?: boolean }) {
               </div>
 
               {user ? (
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={signOut}
-                  className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl border border-[#c87962]/25 bg-[#c87962]/10 py-3 font-extrabold text-[#a65343] transition hover:bg-[#c87962]/16 disabled:opacity-50 dark:text-[#ffb6a5]"
-                >
-                  <LogOut className="h-4 w-4" />
-                  ออกจากระบบ
-                </button>
+                <div className="mt-6 space-y-3">
+                  {healthSummary && (
+                    <div className="rounded-3xl border border-[#8f765d]/12 bg-[#fffdf8]/62 p-4 dark:border-white/8 dark:bg-white/5">
+                      <div className="text-xs font-extrabold text-[#a18c79] dark:text-[#cdb99d]">ข้อมูลสุขภาพที่ใช้คำนวณ</div>
+                      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                        <div className="rounded-2xl bg-[#f1e4cf]/58 p-2 dark:bg-black/10">
+                          <div className="text-[10px] font-bold text-[#a18c79]">เป้าหมาย</div>
+                          <div className="mt-1 truncate text-xs font-black text-[#55483d] dark:text-[#fff4df]">{healthSummary.goalLabel}</div>
+                        </div>
+                        <div className="rounded-2xl bg-[#f2cd72]/20 p-2">
+                          <div className="text-[10px] font-bold text-[#9c7a28]">พลังงาน</div>
+                          <div className="mt-1 text-xs font-black text-[#765817]">{Math.round(healthSummary.targetKcal)} kcal</div>
+                        </div>
+                        <div className="rounded-2xl bg-[#d98c68]/12 p-2">
+                          <div className="text-[10px] font-bold text-[#a96550]">โปรตีน</div>
+                          <div className="mt-1 text-xs font-black text-[#a96550]">{healthSummary.proteinGoal}g</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {onEditHealthProfile && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpen(false);
+                        onEditHealthProfile();
+                      }}
+                      className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#d98c68] py-3 font-extrabold text-white shadow-[0_10px_24px_rgba(177,105,75,0.22)] transition hover:bg-[#c97c5b]"
+                    >
+                      <UserRound className="h-4 w-4" />
+                      แก้ไขข้อมูลสุขภาพและเป้าหมาย
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={signOut}
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl border border-[#c87962]/25 bg-[#c87962]/10 py-3 font-extrabold text-[#a65343] transition hover:bg-[#c87962]/16 disabled:opacity-50 dark:text-[#ffb6a5]"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    ออกจากระบบ
+                  </button>
+                </div>
               ) : (
                 <>
                   <button
